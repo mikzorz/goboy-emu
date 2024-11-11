@@ -23,7 +23,6 @@ import (
 //   Image is CPU/ram, Texture is GPU/OpenGL. Images must be converted to texture for rendering. Use texture directly when possible.
 
 // Step 1. Create debugging screen layout, pause rom execution.
-//  Finish the drawInstructions() func below.
 //  Registers
 //  Palette
 //  Tile Data
@@ -114,7 +113,7 @@ func init() {
 		// readBank(0, 0)
 		// readBank(1, 1)
 
-		instructions = disassemble(0x0000, 0xFFFF)
+		instructions = disassemble(0x0150, 0xFFFF)
 		tilePixels = getTileData()
 	}
 }
@@ -156,7 +155,7 @@ func main() {
 // draw the window with debug info and update the PPU. PPU handles the game only.
 func draw() {
 	rl.BeginDrawing()
-	rl.ClearBackground(rl.Black)
+	rl.ClearBackground(color.RGBA{20,20,20,255})
 	drawDebugInfo()
 	// ppu.Draw()
 	rl.EndDrawing()
@@ -166,6 +165,7 @@ func draw() {
 func drawDebugInfo() {
 	drawMem(0x8000, 0x97FF)
 	drawInstructions()
+  drawRegisters()
 	drawTiles()
 }
 
@@ -227,6 +227,20 @@ func drawInstructions() {
 		found++
 		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + (extra+found)*fontSize)}, float32(fontSize), 0, rl.LightGray)
 	}
+}
+
+func drawRegisters() {
+  rl.DrawTextEx(debugFont, fmt.Sprintf("A: %d", cpu.A), rl.Vector2{float32(debugX + 250), 5}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("BC: %d", cpu.BC), rl.Vector2{float32(debugX + 250 + int32(3 * fontSize)), 5}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("DE: %d", cpu.DE), rl.Vector2{float32(debugX + 250 + int32(6 * fontSize)), 5}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("HL: %d", cpu.HL), rl.Vector2{float32(debugX + 250 + int32(9 * fontSize)), 5}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("SP: %d", cpu.SP), rl.Vector2{float32(debugX + 250 + int32(12 * fontSize)), 5}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("IE: %d", cpu.IE), rl.Vector2{float32(debugX + 250 + int32(15 * fontSize)), 5}, float32(fontSize), 0, rl.LightGray)
+
+  rl.DrawTextEx(debugFont, fmt.Sprintf("Z: %d", cpu.F >> 7), rl.Vector2{float32(debugX + 250), float32(5 + fontSize)}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("N: %d", (cpu.F >> 6) & 1), rl.Vector2{float32(debugX + 250 + int32(3 * fontSize)), float32(5 + fontSize)}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("HC: %d", (cpu.F >> 5) & 1), rl.Vector2{float32(debugX + 250 + int32(6 * fontSize)), float32(5 + fontSize)}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("C: %d", (cpu.F >> 4) & 1), rl.Vector2{float32(debugX + 250 + int32(9 * fontSize)), float32(5 + fontSize)}, float32(fontSize), 0, rl.LightGray)
 }
 
 // Copy tile data from vram to an rl.Image.
@@ -340,13 +354,13 @@ func disassemble(startAddr, endAddr uint16) map[uint16]string {
 			if inst.To == m16 {
 				instStr += fmt.Sprintf(" [0x%04X]", a16)
 			} else if inst.To != "" {
-				instStr += " " + inst.To
+				instStr += " " + inst.To + ","
 			}
 
 			if inst.From == m16 {
-				instStr += fmt.Sprintf(", [0x%04X] (0x%02X)", a16, val)
+				instStr += fmt.Sprintf(" [0x%04X] (0x%02X)", a16, val)
 			} else if inst.From != "" {
-				instStr += fmt.Sprintf(", %s", inst.From)
+				instStr += fmt.Sprintf(" %s", inst.From)
 			}
 		case E8:
 			n8 := bus.Read(addr)

@@ -61,7 +61,7 @@ var mainLookup map[byte]Instruction = map[byte]Instruction{
 	0x04: Instruction{Op: "INC", DataType: NODATA, To: B},            // INC B
 	0x05: Instruction{Op: "DEC", DataType: NODATA, To: B},            // DEC B
 	0x06: Instruction{Op: "LD", DataType: N8, To: B},                 // LD B, n8
-	0x07: Instruction{Op: "RLCA", DataType: NODATA, To: A},                  // RLCA (rotate left circular accumulator)
+	0x07: Instruction{Op: "RLCA", DataType: NODATA},                  // RLCA (rotate left circular accumulator)
 	0x08: Instruction{Op: "LD", DataType: A16, To: m16, From: SP},    // LD [a16], SP
 	0x09: Instruction{Op: "ADD", DataType: NODATA, To: HL, From: BC}, // ADD HL, BC
 	0x0A: Instruction{Op: "LD", DataType: NODATA, To: A, From: mBC},  // LD A, [BC]
@@ -69,7 +69,7 @@ var mainLookup map[byte]Instruction = map[byte]Instruction{
 	0x0C: Instruction{Op: "INC", DataType: NODATA, To: C},            // INC C
 	0x0D: Instruction{Op: "DEC", DataType: NODATA, To: C},            // DEC C
 	0x0E: Instruction{Op: "LD", DataType: N8, To: C},                 // LD C, n8
-	0x0F: Instruction{Op: "RRCA", DataType: NODATA, To: A},                  // RRCA (rotate right circular accumulator)
+	0x0F: Instruction{Op: "RRCA", DataType: NODATA},                  // RRCA (rotate right circular accumulator)
 	0x10: Instruction{Op: "STOP", DataType: N8},                      // STOP n8
 	0x11: Instruction{Op: "LD", DataType: N16, To: DE},               // LD DE, n16
 	0x12: Instruction{Op: "LD", DataType: NODATA, To: mDE, From: A},  // LD [DE], A
@@ -77,7 +77,7 @@ var mainLookup map[byte]Instruction = map[byte]Instruction{
 	0x14: Instruction{Op: "INC", DataType: NODATA, To: D},            // INC D
 	0x15: Instruction{Op: "DEC", DataType: NODATA, To: D},            // DEC D
 	0x16: Instruction{Op: "LD", DataType: N8, To: D},                 // LD D, n8
-	0x17: Instruction{Op: "RLA", DataType: NODATA, To: A},                  // RLA (rotate left accumulator)
+	0x17: Instruction{Op: "RLA", DataType: NODATA},                  // RLA (rotate left accumulator)
 	0x18: Instruction{Op: "JR", DataType: E8},                        // Jump forward by e8
 	0x19: Instruction{Op: "ADD", DataType: NODATA, To: HL, From: DE}, // ADD HL, DE
 	0x1A: Instruction{Op: "LD", DataType: NODATA, To: A, From: mDE},  // LD A, [DE]
@@ -85,7 +85,7 @@ var mainLookup map[byte]Instruction = map[byte]Instruction{
 	0x1C: Instruction{Op: "INC", DataType: NODATA, To: E},            // INC E
 	0x1D: Instruction{Op: "DEC", DataType: NODATA, To: E},            // DEC E
 	0x1E: Instruction{Op: "LD", DataType: A8, To: E, From: m8},       // LD E, n8
-	0x1F: Instruction{Op: "RRA", DataType: NODATA, To: A},            // RRA, rotate A to right (todo, add carry to msb?)
+	0x1F: Instruction{Op: "RRA", DataType: NODATA},            // RRA, rotate A to right (todo, add carry to msb?)
 	0x20: Instruction{Op: "JR", DataType: E8, Flag: NZ},              // Jump by e8 if z == 0
 	0x21: Instruction{Op: "LD", DataType: N16, To: HL},               // LD HL, n16
 	0x22: Instruction{Op: "LD", DataType: NODATA, To: mHLp, From: A}, // LD [HL+], A
