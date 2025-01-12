@@ -3,27 +3,21 @@ package main
 import "log"
 
 type Bus struct {
-	cart    *Cart
-	cpu     *CPU
-	ppu     *PPU
-	clock   *Clock
-	lcd     *LCD
-	wram    [0x2000]byte
-	hram    [0x7F]byte
-	SB      byte // Serial Transfer Data
-	SC      byte // Serial Transfer Control
-	DIV     byte
-	oldTIMA byte
-	TIMA    byte
-	TMA     byte // Timer Modulo
-	TAC     byte
+	cart   *Cart
+	cpu    *CPU
+	ppu    *PPU
+	clock  *Clock
+	lcd    *LCD
+	joypad *Joypad
+	wram   [0x2000]byte
+	hram   [0x7F]byte
+	SB     byte // Serial Transfer Data
+	SC     byte // Serial Transfer Control
 	// Sound
-	NR32 byte
-	NR50 byte
-	NR51 byte
-	NR52 byte // sound on/off
-	// Joypad
-	JOYP   byte
+	NR32   byte
+	NR50   byte
+	NR51   byte
+	NR52   byte // sound on/off
 	halted bool
 }
 
@@ -31,13 +25,14 @@ func NewBus(cart *Cart) *Bus {
 	wram := [0x2000]byte{}
 	hram := [0x7F]byte{}
 	b := &Bus{
-		cart:  cart,
-		cpu:   NewCPU(),
-		ppu:   NewPPU(),
-		clock: NewClock(),
-		lcd:   NewLCD(),
-		wram:  wram,
-		hram:  hram,
+		cart:   cart,
+		cpu:    NewCPU(),
+		ppu:    NewPPU(),
+		clock:  NewClock(),
+		lcd:    NewLCD(),
+		joypad: NewJoypad(),
+		wram:   wram,
+		hram:   hram,
 	}
 	cart.bus = b
 	b.cpu.bus = b
@@ -48,43 +43,18 @@ func NewBus(cart *Cart) *Bus {
 }
 
 func (b *Bus) Cycle() {
-	if b.clock.GetTicks()%4 == 0 {
-		// timers
-		oldSysCounter := b.clock.sysCounter
-		b.clock.sysCounter++
-		b.DIV = byte(b.clock.sysCounter >> 6) // 16384 hz
-		if isBitSet(2, b.TAC) {
-			if b.TIMA < b.oldTIMA {
-				b.TIMA = b.TMA
-				b.InterruptRequest(TIMER)
-			}
-			b.oldTIMA = b.TIMA
-			sysCounterDiff := oldSysCounter ^ b.clock.sysCounter
-			switch b.TAC & 0x3 {
-			case 0:
-				b.TIMA += byte((sysCounterDiff >> 8) & 0x1)
-			case 1:
-				b.TIMA += byte((sysCounterDiff >> 2) & 0x1)
-			case 2:
-				b.TIMA += byte((sysCounterDiff >> 4) & 0x1)
-			case 3:
-				b.TIMA += byte((sysCounterDiff >> 6) & 0x1)
-			}
-		}
-
+	b.clock.Tick() // Should clock tick before or after cpu cycle?
+	// TODO don't tick if STOPped
+	if b.clock.DIV%4 == 0 {
 		b.cpu.Cycle()
 	}
 	b.ppu.Cycle()
-	b.clock.Tick()
-
 }
 
 func (b Bus) Read(addr uint16) byte {
 	switch {
-	case addr <= 0x3FFF:
-		// 0000-3FFF, cart bank 00
-		return b.cart.Read(addr)
 	case addr <= 0x7FFF:
+		// 0000-3FFF, cart bank X0
 		// 4000-7FFF, cart bank 01-NN
 		return b.cart.Read(addr)
 	case addr <= 0x9FFF:
@@ -107,7 +77,7 @@ func (b Bus) Read(addr uint16) byte {
 		return b.ppu.Read(addr)
 	case addr <= 0xFF7F:
 		// FF00-FF7F, IO
-		return b.IO(addr)
+		return b.ReadIO(addr)
 	case addr <= 0xFFFE:
 		// FF80-FFFE, hram
 		return b.hram[addr-0xFF80]
@@ -120,23 +90,23 @@ func (b Bus) Read(addr uint16) byte {
 	return 0
 }
 
-func (b *Bus) IO(addr uint16) byte {
+func (b *Bus) ReadIO(addr uint16) byte {
 	switch addr {
 	case 0xFF00:
 		// Joypad Buttons
-		return b.JOYP
+		return b.joypad.Read()
 	case 0xFF01:
 		return b.SB
 	case 0xFF02:
 		return b.SC
 	case 0xFF04:
-		return b.DIV
+		return msb(b.clock.DIV)
 	case 0xFF05:
-		return b.TIMA
+		return b.clock.TIMA
 	case 0xFF06:
-		return b.TMA
+		return b.clock.TMA
 	case 0xFF07:
-		return b.TAC
+		return b.clock.TAC
 	case 0xFF0F:
 		return b.cpu.IF
 	//  // case 0xFF1C:
@@ -199,14 +169,8 @@ func (b *Bus) IO(addr uint16) byte {
 
 func (b *Bus) Write(addr uint16, data byte) {
 	switch {
-	case (addr >= 0x2000 && addr <= 0x3FFF):
-		// switch rom bank 01-1F
-		bank := data & 0x1F // lower 5 bits
-		switch bank {
-		case 0x00, 0x20, 0x40, 0x60:
-			bank++
-		}
-		b.cart.SwitchBank(bank)
+	case (addr >= 0x0000 && addr <= 0x7FFF):
+    b.cart.Write(addr, data)
 	case (addr >= 0x8000 && addr <= 0x9FFF):
 		b.ppu.Write(addr, data)
 	case (addr >= 0xA000 && addr <= 0xBFFF):
@@ -228,8 +192,7 @@ func (b *Bus) Write(addr uint16, data byte) {
 	default:
 		switch addr {
 		case 0xFF00:
-			keySelect := data & 0x30
-			b.JOYP = (b.JOYP & 0xCF) | keySelect
+			b.joypad.Write(data)
 		case 0xFF01:
 			b.SB = data
 		case 0xFF02:
@@ -239,13 +202,15 @@ func (b *Bus) Write(addr uint16, data byte) {
 				b.SC = 0x0
 			}
 		case 0xFF04:
-			b.DIV = 0x00
+			b.clock.DIV = 0x0000
 		case 0xFF05:
-			b.TIMA = data
+			if !b.clock.timaOverflow {
+				b.clock.TIMA = data
+			}
 		case 0xFF06:
-			b.TMA = data
+			b.clock.TMA = data
 		case 0xFF07:
-			b.TAC = data
+			b.clock.TAC = data
 		case 0xFF0F:
 			b.cpu.IF = data
 		case 0xFF10, 0xFF11, 0xFF12, 0xFF13, 0xFF14:
@@ -290,16 +255,13 @@ func (b *Bus) Write(addr uint16, data byte) {
 		case 0xFF45:
 			b.ppu.LYC = data
 		case 0xFF46:
-			b.ppu.oamDMA = true
-			b.ppu.oamSource = data
-			b.ppu.oamTransferI = 0
+			b.ppu.StartOAMTransfer(data)
 		case 0xFF47:
 			b.ppu.BGP = data
 		case 0xFF48:
 			b.ppu.OBP0 = data
 		case 0xFF49:
 			b.ppu.OBP1 = data
-			// case addr <= 0xFF7F:
 		case 0xFF4A:
 			b.ppu.WY = data
 		case 0xFF4B:
@@ -325,11 +287,11 @@ func (b *Bus) Write(addr uint16, data byte) {
 type interrupt int
 
 const (
-	VBLANK interrupt = iota
-	LCDI
-	TIMER
-	SERIAL
-	JOYPAD
+	VBLANK_INTR interrupt = iota
+	LCDI_INTR
+	TIMER_INTR
+	SERIAL_INTR
+	JOYPAD_INTR
 )
 
 // I think interrupts are supposed to be direct to CPU. For now, pass through bus.

@@ -37,7 +37,7 @@ func (l *LCD) Pix() {
 	colourId := (getBit(bit, tileHi) << 1) | getBit(bit, tileLo)
 	c := colours[(bus.Read(0xFF47)>>(colourId*2))&0x3]
 
-	rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(y), c)
+	rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(y)-1, c)
 	l.x++
 
 	if int32(l.x) >= TRUEWIDTH {

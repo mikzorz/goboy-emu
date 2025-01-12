@@ -88,7 +88,7 @@ func (p *PPU) Cycle() {
 			// H-Blank
 		case 1:
 			// V-Blank
-			p.bus.InterruptRequest(VBLANK)
+			p.bus.InterruptRequest(VBLANK_INTR)
 			p.STAT &= 0xFD // Mode 1
 		}
 
@@ -101,7 +101,7 @@ func (p *PPU) Cycle() {
 		if p.LY == p.LYC && p.dot == 0 {
 			p.STAT = setBit(2, p.STAT)
 			// TODO may need to check STAT bits 6-3 to decide whether to interrupt
-			p.bus.InterruptRequest(LCDI)
+			p.bus.InterruptRequest(LCDI_INTR)
 		}
 
 		// for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
@@ -147,6 +147,8 @@ func (p *PPU) Write(addr uint16, data byte) {
 	}
 }
 
-func (p PPU) Draw() {
-	// drawScreen()
+func (p *PPU) StartOAMTransfer(source byte) {
+	p.oamDMA = true
+	p.oamSource = source
+	p.oamTransferI = 0
 }

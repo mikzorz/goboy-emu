@@ -65,7 +65,7 @@ type CPU struct {
 	interruptAddresses []uint8
 	// TODO, when I implement accurate(?) M-Cycles, use a function queue that pops a function per cycle. Then cleanup interrupt handling.
 	funcQueue []func()
-	// these  bools are used to make functions wait for clear data lines / units
+	// these bools are used to make functions wait for clear data lines / units
 	canFetchOp  bool
 	addrBusFull bool
 	dataBusFull bool
@@ -97,37 +97,7 @@ func NewCPU() *CPU {
 }
 
 func (c *CPU) Cycle() {
-	// According to a reddit comment, normal cpu cycle is T-cycle 1, but interrupt checks are during T3?
-	// Check interrupt bytes
-	if c.IF != 0 && c.IE != 0 {
-		c.bus.halted = false
-		if c.IME == 1 {
-			for bit := 0; bit <= 4; bit++ {
-				if isBitSet(bit, c.IF) && isBitSet(bit, c.IE) {
-					// c.interruptStep = 5
-					c.IME = 0
-					c.interruptAddr = c.interruptAddresses[bit]
-					c.IF = resetBit(bit, c.IF)
 
-					// TODO, if interrupted instruction needs to be remembered, this will need to be tweaked.
-					c.IR = 0xC7 // RST
-					c.inst = lookup(c.IR, false)
-          c.inst.Op = "INT"
-					// c.inst.Abs = c.interruptAddr
-					c.WZ = joinBytes(0x00, c.interruptAddr)
-
-					// prepend interrupt funcs
-					c.PushToFuncQueue(
-						c.Nop, c.Nop,
-						c.PushToStack(HI), c.PushToStack(LO),
-						c.SetPC,
-					)
-					return
-					// log.Panicf("interrupted %d", len(c.funcQueue))
-				}
-			}
-		}
-	}
 	if !c.bus.halted {
 
 		// R8 <- R8 handled by ALU
@@ -158,11 +128,11 @@ func (c *CPU) Cycle() {
 			c.FetchIR()
 
 			switch c.inst.Op {
-			case "STOP": 
-        // c.bus.halted = true
-        // c.bus.DIV = 0
+			case "STOP":
+				// c.bus.halted = true
+				// c.bus.DIV = 0
 				c.PushToFuncQueue(c.Nop)
-      // TODO, STOP does a lot more than NOP, but this is here just to pass blargg's cpu_instrs test. CGB needs it for speed switching, DMG not so much.
+				// TODO, STOP does a lot more than NOP, but this is here just to pass blargg's cpu_instrs test. CGB needs it for speed switching, DMG not so much.
 			case "NOP":
 				c.PushToFuncQueue(c.Nop)
 			case "HALT":
@@ -397,6 +367,8 @@ func (c *CPU) Cycle() {
 	} else {
 		// log.Fatalf("halted, TODO: handle this")
 	}
+
+	c.CheckInterrupts() // Before or after reading op?
 }
 
 func (c *CPU) handlePrefix() {
@@ -406,8 +378,8 @@ func (c *CPU) handlePrefix() {
 	if c.inst.To == mHL {
 		c.PushToFuncQueue(c.Read)
 	} else {
-    c.Read()
-  }
+		c.Read()
+	}
 
 	switch c.inst.Op {
 	case "SWAP":
@@ -440,8 +412,44 @@ func (c *CPU) handlePrefix() {
 	if c.inst.To == mHL {
 		c.PushToFuncQueue(c.Write)
 	} else {
-    c.PushToFuncQueue(c.SetRegister)
-  }
+		c.PushToFuncQueue(c.SetRegister)
+	}
+}
+
+func (c *CPU) CheckInterrupts() {
+	// According to a reddit comment, normal cpu cycle is T-cycle 1, but interrupt checks are during T3?
+	// Check interrupt bytes
+	if c.IF != 0 && c.IE != 0 {
+		c.bus.halted = false
+		if c.IME == 1 {
+			for bit := 0; bit <= 4; bit++ {
+				if isBitSet(bit, c.IF) && isBitSet(bit, c.IE) {
+					// c.interruptStep = 5
+					c.IME = 0
+					c.interruptAddr = c.interruptAddresses[bit]
+					c.IF = resetBit(bit, c.IF)
+
+					// TODO, if interrupted instruction needs to be remembered, this will need to be tweaked.
+					c.IR = 0xC7 // RST
+					c.inst = lookup(c.IR, false)
+					c.inst.Op = "INT"
+					// c.inst.Abs = c.interruptAddr
+					c.WZ = joinBytes(0x00, c.interruptAddr)
+
+					// interrupt funcs
+					c.funcQueue = []func(){}
+					c.PushToFuncQueue(
+						c.Nop, c.Nop,
+						c.PushToStack(HI), c.PushToStack(LO),
+						c.SetPC,
+					)
+					return
+					// log.Panicf("interrupted %d", len(c.funcQueue))
+				}
+			}
+		}
+	}
+
 }
 
 func (c *CPU) PushToFuncQueue(fns ...func()) {
@@ -680,7 +688,7 @@ func (c *CPU) PushToStack(hilo string) func() {
 		var data uint16
 		var b byte
 		if c.inst.DataType == NODATA {
-			if c.inst.Op == "RST" {
+			if c.inst.Op == "RST" || c.inst.Op == "INT" {
 				// data = c.readR16(WZ)
 				data = c.PC
 			} else {
@@ -795,17 +803,17 @@ func (c *CPU) Bit() {
 // Set bit of byte
 func (c *CPU) Set() {
 	var r byte
-  r = c.readR8(Z)
-  r = setBit(c.inst.Bit, r)
-  c.writeR8(Z, r)
+	r = c.readR8(Z)
+	r = setBit(c.inst.Bit, r)
+	c.writeR8(Z, r)
 }
 
 // Reset bit
 func (c *CPU) Res() {
 	var r byte
-		r = c.readR8(Z)
-		r = resetBit(c.inst.Bit, r)
-		c.writeR8(Z, r)
+	r = c.readR8(Z)
+	r = resetBit(c.inst.Bit, r)
+	c.writeR8(Z, r)
 }
 
 // Shift right arithmetic
