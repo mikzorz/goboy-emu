@@ -116,6 +116,7 @@ func (c *CPU) DecodePrefix() {
   c.opFunc = func() {
     if c.curCycle == 0 {
       c.Read()
+      return
     }
 
     if c.curCycle == 1 || c.inst.To != mHL {
@@ -124,6 +125,8 @@ func (c *CPU) DecodePrefix() {
         c.Swap()
       case "BIT":
         c.Bit()
+        c.DecodeOp()
+        return
       case "RES":
         c.Res()
       case "SET":
@@ -149,11 +152,14 @@ func (c *CPU) DecodePrefix() {
       if c.inst.To != mHL {
         c.SetRegister()
         c.DecodeOp()
+      } else {
+        c.Write()
+
       }
+      return
     }
 
     if c.curCycle == 2 {
-      c.Write()
       c.DecodeOp()
     }
   }
@@ -433,8 +439,8 @@ func (c *CPU) setLDFunc() {
 				switch c.curCycle {
 				case 0:
 					c.Read()
-				case 1:
 					c.writeIndirect(mHL, c.readR8(Z))
+				case 1:
 					c.DecodeOp()
 				}
 			}
@@ -449,8 +455,22 @@ func (c *CPU) setLDFunc() {
 		return
 	} else if c.IR&0xC7 == 0x06 {
 		// 00xxx110
-		// LD r n
-		c.opFunc = c.LDn
+    if c.IR == 0x36 {
+      // LD (HL) n
+      c.opFunc = func() {
+        switch c.curCycle {
+        case 0:
+          c.Fetch(LO)
+        case 1:
+          c.writeIndirect(mHL, c.readR8(Z))
+        case 2:
+          c.DecodeOp()
+        }
+      }
+    } else {
+      // LD r n
+      c.opFunc = c.LDn
+    }
 		return
 	} else if c.IR&0xCF == 0x1 {
 		// 00xx0001
@@ -555,9 +575,6 @@ func (c *CPU) setLDFunc() {
 				c.DecodeOp()
 			}
 		}
-	case 0x36:
-		// LD (HL) n
-		panic("ld (hl) n")
 	case 0x3A:
 		// LD A (HL-)
 		c.opFunc = c.LDHLMinus
@@ -732,8 +749,8 @@ func (c *CPU) INC() {
 		c.writeR8(Z, c.readIndirect(mHL))
 		case 1:
 			c.incrementReg(Z)
-		case 2:
 			c.writeIndirect(mHL, c.readR8(Z))
+		case 2:
 			c.DecodeOp()
 		}
 	} else if c.regType(c.inst.To) == R16 {
@@ -756,8 +773,8 @@ func (c *CPU) DEC() {
 		c.writeR8(Z, c.readIndirect(mHL))
 		case 1:
 			c.decrementReg(Z)
-		case 2:
 			c.writeIndirect(mHL, c.readR8(Z))
+		case 2:
 			c.DecodeOp()
 		}
 	} else if c.regType(c.inst.To) == R16 {
@@ -1222,7 +1239,7 @@ func (c *CPU) SetRegister() {
 	case INDIRECT:
 		c.writeIndirect(c.inst.To, c.readR8(Z))
 	default:
-		log.Panicf("c.SetRegister unhandled regType %s", rt)
+		log.Panicf("c.SetRegister unhandled regType %s (%s)", rt, c.inst.To)
 	}
 }
 

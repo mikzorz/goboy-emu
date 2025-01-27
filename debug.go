@@ -37,6 +37,7 @@ var opOccurrences = map[byte]int{
 	// 0xc9: 0,
 	// 0x33: 0,
   // 0x27: 255*4*5,
+  // 0xC3: 0,
 }
 
 var opsWithArgs = map[byte]byte{
@@ -51,6 +52,7 @@ var cyclebreaks = map[int]bool{
 	// 935000: true,
 	// 251000: true,
   // 581230: true,
+  // 2120000: true,
 }
 var curCycle = 0
 
