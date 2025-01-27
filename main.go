@@ -18,6 +18,8 @@ const DEV = false
 
 // Clean up code. Break big funcs up. Make things easier to work with.
 
+// Draw OAM tiles in debug screen.
+
 // Pass more tests
 // Currently, instr_timing.gb fails during test setup
 //  The timer triggers an interrupt slightly too late.
@@ -119,7 +121,7 @@ var ppu = NewPPU()
 var cart = NewCart()
 var bus = NewBus(cart)
 
-func init() {
+func setup() {
 	flag.StringVar(&romPath, "rom", "", "The path to the rom file.")
 	flag.Parse()
 
@@ -149,6 +151,8 @@ func init() {
 
 func main() {
 
+	setup()
+
 	rl.InitWindow(window.w, window.h, "Game Boy Emulator made in Go")
 	defer rl.CloseWindow()
 
@@ -164,7 +168,6 @@ func main() {
 		if r := recover(); r != nil {
 			log.Printf("Crashed at address 0x%04X\n", bus.cpu.PC)
 			log.Printf("OP: 0x%02X %s\n", bus.cpu.IR, bus.cpu.inst.Op)
-			log.Printf("%d funcs in queue", len(bus.cpu.funcQueue))
 		}
 	}()
 
@@ -174,7 +177,7 @@ func main() {
 		getJoypadInput()
 
 		if DEV {
-      handleDebugInput()
+			handleDebugInput()
 
 			if !paused {
 				for i := 0; i < cyclesPerFrame; i++ {

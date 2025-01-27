@@ -1,10 +1,11 @@
 package main
 
 import (
-  "fmt"
-  "log"
-  "strings"
+	"fmt"
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"log"
+	"strings"
+  utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 // TODO, remove hardcoded font or provide one with project.
@@ -19,27 +20,37 @@ var debugX int32 = max(memRowWidth, gameWindow.w) + 5
 
 // Debug control
 var paused = true
-var cyclesPerFrame = 1
+var cyclesPerFrame = 8
 var breakpoints = map[uint16]bool{
 	// 0xDEFA: true,
 	// 0xC2C0: true,
+  // 0x4BCA: true,
 }
 
 // int = how many occurrences to skip before pausing.
+// multiply by 4, because it decrements per tick, not per cycle
 var opOccurrences = map[byte]int{
-	// 0x40: 0, // LD B, B (used by tests, but also unintentionally matches CB 40)
+	// 0x40: 0, // LD B, B (used by mts tests, but also unintentionally matches CB 40)
 	// 0xFB: 0, // EI
 	// 0x06: 1703,
+	// 0xc3: 0,
+	// 0xc9: 0,
+	// 0x33: 0,
+  // 0x27: 255*4*5,
 }
 
 var opsWithArgs = map[byte]byte{
 	// 0xE0: 0x05, // LDH TIMA
+	// 0xE0: 0x07, // LDH TAC
+  // 0x3E: 0x0, // LD A 0
 }
 
 // Break after X amount of t-cycles
 var cyclebreaks = map[int]bool{
 	// 1665000: true,
 	// 935000: true,
+	// 251000: true,
+  // 581230: true,
 }
 var curCycle = 0
 
@@ -48,59 +59,59 @@ var disAssembleStart, disAssembleEnd uint16 = 0x0000, 0xFFFF
 const instructionsPeekAmount = 12 // How many lines above and below current instruction to show?
 
 func handleDebugInput() {
-  if rl.IsKeyPressed(rl.KeyM) {
-    shouldDrawGame = !shouldDrawGame
-  }
+	if rl.IsKeyPressed(rl.KeyM) {
+		shouldDrawGame = !shouldDrawGame
+	}
 
-  if rl.IsKeyPressed(rl.KeyDown) {
-    if rl.IsKeyDown(rl.KeyLeftShift) {
-      memSelection += 7
-    }
-    memSelection++ // Change debug mem selection
-  }
-  if rl.IsKeyPressed(rl.KeyUp) {
-    if rl.IsKeyDown(rl.KeyLeftShift) {
-      memSelection -= 7
-    }
-    memSelection--
-    if memSelection < 0 {
-      memSelection = 0
-    }
-  }
+	if rl.IsKeyPressed(rl.KeyDown) {
+		if rl.IsKeyDown(rl.KeyLeftShift) {
+			memSelection += 7
+		}
+		memSelection++ // Change debug mem selection
+	}
+	if rl.IsKeyPressed(rl.KeyUp) {
+		if rl.IsKeyDown(rl.KeyLeftShift) {
+			memSelection -= 7
+		}
+		memSelection--
+		if memSelection < 0 {
+			memSelection = 0
+		}
+	}
 
-  // 1 M-Cycle
-  if rl.IsKeyPressed(rl.KeyA) {
-    mcycle()
-  }
+	// 1 M-Cycle
+	if rl.IsKeyPressed(rl.KeyA) {
+		mcycle()
+	}
 
-  // 1 Op (varying amount of cycles)
-  if rl.IsKeyPressed(rl.KeyS) {
-    prevOp := bus.cpu.IR
-  for prevOp == bus.cpu.IR {
-      mcycle()
-    }
-  }
+	// 1 Op (varying amount of cycles)
+	if rl.IsKeyPressed(rl.KeyS) {
+		prevOp := bus.cpu.IR
+		for prevOp == bus.cpu.IR {
+			mcycle()
+		}
+	}
 
-  // 10 Ops (varying amount of cycles)
-  if rl.IsKeyPressed(rl.KeyD) {
-    for i := 0; i < 100; i++ {
-      prevOp := bus.cpu.IR
-      for prevOp == bus.cpu.IR {
-        mcycle()
-      }
-    }
-  }
+	// 10 Ops (varying amount of cycles)
+	if rl.IsKeyPressed(rl.KeyD) {
+		for i := 0; i < 100; i++ {
+			prevOp := bus.cpu.IR
+			for prevOp == bus.cpu.IR {
+				mcycle()
+			}
+		}
+	}
 
-  if rl.IsKeyPressed(rl.KeySpace) {
-    paused = !paused
-  }
+	if rl.IsKeyPressed(rl.KeySpace) {
+		paused = !paused
+	}
 
-  if rl.IsKeyPressed(rl.KeyRight) {
-    cyclesPerFrame *= 2
-  }
-  if rl.IsKeyPressed(rl.KeyLeft) {
-    cyclesPerFrame = max(cyclesPerFrame/2, 1)
-  }
+	if rl.IsKeyPressed(rl.KeyRight) {
+		cyclesPerFrame *= 2
+	}
+	if rl.IsKeyPressed(rl.KeyLeft) {
+		cyclesPerFrame = max(cyclesPerFrame/2, 1)
+	}
 
 }
 
@@ -221,10 +232,10 @@ func drawRegisters() {
 	drawRegister(cpu.HL, "HL", 4, 0)
 	drawRegister(cpu.SP, "SP", 5, 0)
 
-	drawRegister(getBit(7, cpu.F), "Z", 1, 1)
-	drawRegister(getBit(6, cpu.F), "N", 2, 1)
-	drawRegister(getBit(5, cpu.F), "HC", 3, 1)
-	drawRegister(getBit(4, cpu.F), "C", 4, 1)
+	drawRegister(utils.GetBit(7, cpu.F), "Z", 1, 1)
+	drawRegister(utils.GetBit(6, cpu.F), "N", 2, 1)
+	drawRegister(utils.GetBit(5, cpu.F), "HC", 3, 1)
+	drawRegister(utils.GetBit(4, cpu.F), "C", 4, 1)
 
 	drawRegister(cpu.IE, "IE", 6, 0)
 	drawRegister(cpu.IF, "IF", 6, 1)
@@ -264,8 +275,8 @@ func getTileData() []byte {
 		loByte := bus.ppu.vram[rAddr]
 		hiByte := bus.ppu.vram[rAddr+1]
 		for b := 7; b >= 0; b-- {
-			leftBit := getBit(b, hiByte)
-			rightBit := getBit(b, loByte)
+			leftBit := utils.GetBit(b, hiByte)
+			rightBit := utils.GetBit(b, loByte)
 			colourID := (leftBit << 1) | rightBit
 			pixels[tRow*8+(7-b)] = colourID
 		}
@@ -368,7 +379,7 @@ func disassemble(startAddr, endAddr uint16) map[uint16]string {
 				addr++
 				hi := bus.Read(addr)
 				addr++
-				n16 := joinBytes(hi, lo)
+				n16 := utils.JoinBytes(hi, lo)
 				instStr += fmt.Sprintf(" %s, 0x%04X", inst.To, n16)
 			case A8:
 				a8 := bus.Read(addr)
@@ -390,7 +401,7 @@ func disassemble(startAddr, endAddr uint16) map[uint16]string {
 				addr++
 				hi := bus.Read(addr)
 				addr++
-				a16 := joinBytes(hi, lo)
+				a16 := utils.JoinBytes(hi, lo)
 
 				if inst.To == m16 {
 					instStr += fmt.Sprintf(" [0x%04X]", a16)

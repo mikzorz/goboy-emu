@@ -3,6 +3,7 @@ package main
 // import "log"
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+    utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type LCD struct {
@@ -23,7 +24,7 @@ func (l *LCD) Pix() {
 
 	// Get tile data
 	tileDataAddr := tileId*16 + uint16(y%8)*2
-	if getBit(4, l.bus.ppu.LCDC) == 0 && tileId < 128 {
+	if utils.GetBit(4, l.bus.ppu.LCDC) == 0 && tileId < 128 {
 		// Only for BG/Window
 		tileDataAddr += 0x1000
 	}
@@ -34,7 +35,7 @@ func (l *LCD) Pix() {
 	column := l.x % 8
 	bit := int(7 - column)
 
-	colourId := (getBit(bit, tileHi) << 1) | getBit(bit, tileLo)
+	colourId := (utils.GetBit(bit, tileHi) << 1) | utils.GetBit(bit, tileLo)
 	c := colours[(bus.Read(0xFF47)>>(colourId*2))&0x3]
 
 	rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(y)-1, c)

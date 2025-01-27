@@ -1,14 +1,22 @@
 package main
 
+import (
+    utils "github.com/mikzorz/gameboy-emulator/helpers"
+
+)
+
 type Clock struct {
 	bus          *Bus
 	speed        uint   // 4194304 Hz / 2^22 Hz
-	DIV          uint16 // increments at 1048576 Hz
+	DIV          uint16 // increments at 1048576 Hz / 16
 	TIMA         byte
 	TMA          byte // Timer Modulo
 	TAC          byte
 	timaOverflow bool
 	prevAND      byte
+
+	sysClock      uint
+	ticksToDivInc int
 }
 
 func NewClock() *Clock {
@@ -26,7 +34,13 @@ var divBit = []int{
 }
 
 func (c *Clock) Tick() {
-	c.DIV++
+	c.sysClock++
+	// c.ticksToDivInc++
+
+	// if c.ticksToDivInc == 256 {
+		c.DIV++
+		// c.ticksToDivInc = 0
+	// }
 
 	if c.timaOverflow {
 		c.timaOverflow = false
@@ -35,15 +49,13 @@ func (c *Clock) Tick() {
 	}
 
 	bitToCheck := divBit[c.TAC&0x3]
-	curAND := byte((c.DIV>>bitToCheck)&0x1) & getBit(2, c.TAC)
+	curAND := byte((c.DIV>>bitToCheck)&0x1) & utils.GetBit(2, c.TAC)
 
 	// "falling edge"
 	if curAND == 0 && c.prevAND == 1 {
-		if c.TIMA == 0xFF {
+		c.TIMA++
+		if c.TIMA == 0x00 {
 			c.timaOverflow = true
-			c.TIMA = 0
-		} else {
-			c.TIMA++
 		}
 	}
 

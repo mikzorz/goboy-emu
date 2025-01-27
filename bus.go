@@ -1,6 +1,17 @@
 package main
 
-import "log"
+import (
+  "log"
+
+  utils "github.com/mikzorz/gameboy-emulator/helpers"
+)
+
+type BusI interface {
+  Read(uint16) byte
+  Write(uint16, byte)
+  isHalted() bool
+  setHalt(bool)
+}
 
 type Bus struct {
 	cart   *Cart
@@ -45,7 +56,7 @@ func NewBus(cart *Cart) *Bus {
 func (b *Bus) Cycle() {
 	b.clock.Tick() // Should clock tick before or after cpu cycle?
 	// TODO don't tick if STOPped
-	if b.clock.DIV%4 == 0 {
+	if b.clock.sysClock%4 == 0 {
 		b.cpu.Cycle()
 	}
 	b.ppu.Cycle()
@@ -100,7 +111,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 	case 0xFF02:
 		return b.SC
 	case 0xFF04:
-		return msb(b.clock.DIV)
+		return utils.MSB(b.clock.DIV)
 	case 0xFF05:
 		return b.clock.TIMA
 	case 0xFF06:
@@ -170,7 +181,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 func (b *Bus) Write(addr uint16, data byte) {
 	switch {
 	case (addr >= 0x0000 && addr <= 0x7FFF):
-    b.cart.Write(addr, data)
+		b.cart.Write(addr, data)
 	case (addr >= 0x8000 && addr <= 0x9FFF):
 		b.ppu.Write(addr, data)
 	case (addr >= 0xA000 && addr <= 0xBFFF):
@@ -197,12 +208,13 @@ func (b *Bus) Write(addr uint16, data byte) {
 			b.SB = data
 		case 0xFF02:
 			b.SC = data
-			if DEV && b.SC == 0x81 {
+			if DEV && b.SC == 0x81 { // blargg's test rom serial output
 				log.Println(string(rune(b.SB)))
 				b.SC = 0x0
 			}
 		case 0xFF04:
 			b.clock.DIV = 0x0000
+			b.clock.sysClock = 0
 		case 0xFF05:
 			if !b.clock.timaOverflow {
 				b.clock.TIMA = data
@@ -236,7 +248,7 @@ func (b *Bus) Write(addr uint16, data byte) {
 		case 0xFF25:
 			b.NR51 = data
 		case 0xFF26:
-			if isBitSet(7, data) {
+			if utils.IsBitSet(7, data) {
 				b.NR52 = 0
 			} else {
 				// Bits 0-3 are read only.
@@ -284,6 +296,14 @@ func (b *Bus) Write(addr uint16, data byte) {
 	}
 }
 
+func (b *Bus) isHalted() bool {
+  return b.halted
+}
+
+func (b *Bus) setHalt(v bool) {
+  b.halted = v
+}
+
 type interrupt int
 
 const (
@@ -296,5 +316,5 @@ const (
 
 // I think interrupts are supposed to be direct to CPU. For now, pass through bus.
 func (b *Bus) InterruptRequest(intr interrupt) {
-	b.cpu.IF = setBit(int(intr), b.cpu.IF)
+	b.cpu.IF = utils.SetBit(int(intr), b.cpu.IF)
 }

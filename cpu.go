@@ -2,6 +2,8 @@ package main
 
 import (
 	// "fmt"
+	"github.com/mikzorz/gameboy-emulator/alu"
+  utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"log"
 )
 
@@ -16,18 +18,6 @@ const (
 	LO = "lo"
 	HI = "hi"
 )
-
-type ALU struct {
-	ALUBusy bool
-}
-
-func (alu *ALU) ALUInc(val byte) byte {
-	return val + 1
-}
-
-func (alu *ALU) ALUDec(val byte) byte {
-	return val - 1
-}
 
 type IDU struct {
 	IDUBusy bool
@@ -45,40 +35,39 @@ func (idu *IDU) IDUDec(val uint16) uint16 {
 
 type RegisterFile struct {
 	IR, IME, A, F      uint8
-	IF                 byte   // Interrupt Flag
-	IE                 byte   // Interrupt Enable
-	BC, DE, HL, PC, SP uint16 // may need to set sp to start at top of stack range
+	IF                 byte // Interrupt Flag
+	IE                 byte // Interrupt Enable
+	BC, DE, HL, PC, SP uint16
 	WZ                 uint16 // intermediate 16 bit register
 }
 
+// should decode instructions and handle interrupts
 type ControlUnit struct {
 }
 
 type CPU struct {
-	ALU
+	alu.ALU
 	IDU
 	RegisterFile
 	ControlUnit
-	bus                *Bus
+	bus                BusI
 	interruptStep      int
 	interruptAddr      uint8
 	interruptAddresses []uint8
-	// TODO, when I implement accurate(?) M-Cycles, use a function queue that pops a function per cycle. Then cleanup interrupt handling.
-	funcQueue []func()
-	// these bools are used to make functions wait for clear data lines / units
-	canFetchOp  bool
-	addrBusFull bool
-	dataBusFull bool
-	miscOp      bool
 
-	inst Instruction // current instruction
+	curCycle byte // current cycle of op
+
+	inst        Instruction // current instruction
+	opFunc      func()
+	flagMatched bool
+  setIME bool // IME setting is delayed 1 cycle
+  nextIME byte // 1 or 0
 }
 
 func NewCPU() *CPU {
-	return &CPU{
-		ALU: ALU{},
+	c := &CPU{
+		ALU: alu.ALU{},
 		IDU: IDU{},
-		// RegisterFile{PC: 0xFF},
 		RegisterFile: RegisterFile{
 			PC: 0x0100,
 			A:  0x01,
@@ -87,373 +76,948 @@ func NewCPU() *CPU {
 			DE: 0x00D8,
 			HL: 0x014D,
 			SP: 0xFFFE,
-		}, // After header
+		},
 		ControlUnit:        ControlUnit{},
 		interruptAddresses: []uint8{0x40, 0x48, 0x50, 0x58, 0x60}, // V-Blank, LCDC, Timer, Serial, Joypad
-		funcQueue:          []func(){},
-		canFetchOp:         true,
-		inst:               lookup(0x00, false),
+		inst:               lookup(0x00, false), // NOP
 	}
+	c.opFunc = c.NOP
+	return c
 }
 
 func (c *CPU) Cycle() {
 
-	if !c.bus.halted {
+	if !c.bus.isHalted() {
 
-		// R8 <- R8 handled by ALU
-		// R8 <- mem, mem <- R8 uses data bus, R16 in addr bus
-		// R16 +/- 1 uses IDU
-		// R16 <- R16 uses "Misc op"
-		c.addrBusFull = false
-		c.dataBusFull = false
-		c.IDUBusy = false
-		c.ALUBusy = false
-		c.miscOp = false
-		c.canFetchOp = true
+    if c.setIME {
+      c.IME = c.nextIME
+      c.setIME = false
+    }
+		// Execute next cycle of op
+		c.opFunc()
+		c.curCycle++
 
-		// Execute next function
-		if len(c.funcQueue) > 0 {
-			nextFn := c.funcQueue[0]
-			c.funcQueue = c.funcQueue[1:]
-			nextFn()
-
-			if c.addrBusFull || c.dataBusFull || c.IDUBusy {
-				c.canFetchOp = false // TODO, check docs for what matters
-			}
-		}
-
-		if len(c.funcQueue) == 0 && c.canFetchOp {
-			// log.Panicf("IF: %02X, IE: %02X, IME: %02X, funcQueue len: %d", c.IF, c.IE, c.IME, len(c.funcQueue))
-			// } else {
-			c.FetchIR()
-
-			switch c.inst.Op {
-			case "STOP":
-				// c.bus.halted = true
-				// c.bus.DIV = 0
-				c.PushToFuncQueue(c.Nop)
-				// TODO, STOP does a lot more than NOP, but this is here just to pass blargg's cpu_instrs test. CGB needs it for speed switching, DMG not so much.
-			case "NOP":
-				c.PushToFuncQueue(c.Nop)
-			case "HALT":
-				// Pause CPU until interrupt pending.
-
-				// TODO
-				// Documented "halt bug",
-				// If IME == 0, but IE & IF != 0, halt ends immediately but PC does not increment
-				// causing the following instruction to be read twice.
-				// If halt comes immediately after ei, the return from the interrupt handler will be the halt command again
-				// If halt is followed by rst, rst will return to itself
-				c.bus.halted = true
-			case "CP":
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Compare)
-			case "JP":
-				// TODO conditional flag
-				// jp nn, jp HL, jp cc nn
-				switch c.inst.DataType {
-				// if jp HL, set c.WZ to c.HL TODO
-				case A16:
-					c.PushToFuncQueue(c.Fetch(LO), c.Fetch(HI))
-					if c.inst.Flag != NOFLAG {
-						if c.FlagIsSet() {
-							c.PushToFuncQueue(c.SetPC)
-						}
-
-					} else {
-						c.PushToFuncQueue(c.SetPC)
-					}
-				case NODATA:
-					c.Read()
-					c.PushToFuncQueue(c.SetPC)
-				default:
-					log.Panicf("unhandled JP datatype")
-				}
-			case "JR":
-				c.PushToFuncQueue(c.Fetch(LO))
-				if c.flagMatches(c.inst.Flag) {
-					c.PushToFuncQueue(c.AddRelPC, c.SetPC)
-				}
-			case "OR":
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Or)
-			case "XOR":
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Xor)
-			case "LD":
-				// LD r, r 1 cycle
-				// LD r, n8 2 cycles
-				// LD rr, n16 3 cycles
-				// LD a16, A 4 cycles
-				// LD a16, SP 5 cycles
-				// LD HL, SP+e 3 cycles
-				switch c.inst.DataType {
-				case NODATA:
-					if c.regType(c.inst.From) == INDIRECT {
-						c.PushToFuncQueue(c.Read)
-					} else {
-						c.Read()
-					}
-					if c.regType(c.inst.To) == INDIRECT {
-						c.PushToFuncQueue(c.Write)
-					} else {
-						c.PushToFuncQueue(c.SetRegister)
-					}
-				case N8:
-					c.PushToFuncQueue(c.Fetch(LO), c.SetRegister)
-				case N16:
-					c.PushToFuncQueue(c.Fetch(LO), c.Fetch(HI), c.SetRegister)
-				case A16:
-					c.PushToFuncQueue(c.Fetch(LO), c.Fetch(HI))
-					if c.inst.To == m16 {
-						if c.inst.From == SP {
-							c.PushToFuncQueue(c.WriteSP(LO), c.WriteSP(HI))
-						} else {
-							c.PushToFuncQueue(c.Write)
-						}
-					} else {
-						c.PushToFuncQueue(c.Read, c.SetRegister)
-					}
-				case E8:
-					c.PushToFuncQueue(c.Fetch(LO), c.AddRelSP, c.SetRegister)
-				default:
-					log.Panicf("LD %s %s not implemented", c.inst.To, c.inst.From)
-				}
-			case "LDH":
-				c.PushToFuncQueue(c.Fetch(LO))
-				if c.inst.To == m8 {
-					c.PushToFuncQueue(c.Write)
-				} else if c.inst.From == m8 {
-					c.PushToFuncQueue(c.Read, c.SetRegister)
-				}
-			case "INC":
-				if c.inst.To == mHL {
-					c.PushToFuncQueue(c.Read, c.INC, c.Write)
-				} else {
-					c.PushToFuncQueue(c.INC) // 16 bit inc and dec take an extra cycle because pc requires same unit for incrementation. 8 bit incs and decs use ALU, 16 bit uses IDU.
-				}
-			case "DEC":
-				if c.inst.To == mHL {
-					c.PushToFuncQueue(c.Read, c.DEC, c.Write)
-				} else {
-					c.PushToFuncQueue(c.DEC) // 16 bit inc and dec take an extra cycle because pc requires same unit for incrementation. 8 bit incs and decs use ALU, 16 bit uses IDU.
-				}
-			case "ADD":
-				switch c.inst.DataType {
-				case E8:
-					// 4 cycles, AddRel should take 2, then set SP during PC inc, Nop used to pad
-					c.PushToFuncQueue(c.Fetch(LO), c.AddRelSP, c.Nop, c.SetRegister)
-				case N8:
-					c.PushToFuncQueue(c.Fetch(LO), c.Add)
-				default:
-					if c.inst.From == mHL {
-						c.PushToFuncQueue(c.Read)
-					} else if c.inst.To == HL {
-						c.PushToFuncQueue(c.AddLo, c.AddHi)
-						break
-					} else {
-						c.Read()
-					}
-					c.PushToFuncQueue(c.Add)
-				}
-			case "ADC":
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Adc)
-			case "SUB":
-				// TODO, this check seems to be kinda common, put in a func.
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Sub)
-			case "SBC":
-				if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.Sbc)
-			case "AND":
-				if c.inst.From == mHL {
-					c.PushToFuncQueue(c.Read)
-				} else if c.inst.DataType == N8 {
-					c.PushToFuncQueue(c.Fetch(LO))
-				} else {
-					c.Read()
-				}
-				c.PushToFuncQueue(c.AND)
-			case "RRA":
-				c.PushToFuncQueue(c.RRA)
-			case "RRCA":
-				c.PushToFuncQueue(c.RRCA)
-			case "RLA":
-				c.PushToFuncQueue(c.RLA)
-			case "RLCA":
-				c.PushToFuncQueue(c.RLCA)
-			case "CPL":
-				c.PushToFuncQueue(c.CPL)
-			case "SCF":
-				c.PushToFuncQueue(c.SCF)
-			case "EI":
-				c.PushToFuncQueue(c.SetIME)
-			case "DI":
-				c.PushToFuncQueue(c.UnsetIME)
-			case "CALL":
-				c.PushToFuncQueue(c.Fetch(LO), c.Fetch(HI))
-				if c.flagMatches(c.inst.Flag) {
-					// According to gbctr.pdf, SP decs first cycle, then push and dec 2nd, then push 3rd
-					// Currently, i'm DECing then pushing in the same cycle
-					c.PushToFuncQueue(c.PushToStack(HI), c.PushToStack(LO), c.SetPC)
-				}
-			case "RET":
-				// TODO, check flag conditional
-				// Unlike with CALL, pop then INCing SP in 1st and 2nd cycle is fine.
-				if c.flagMatches(c.inst.Flag) {
-					c.PushToFuncQueue(c.PopFromStack(LO), c.PopFromStack(HI), c.SetPC)
-				}
-			case "RETI":
-				c.PushToFuncQueue(c.PopFromStack(LO), c.PopFromStack(HI), c.SetPC)
-				c.PushToFuncQueue(c.SetIME)
-			case "RST":
-				c.WZ = joinBytes(0x00, c.inst.Abs)
-				c.PushToFuncQueue(c.PushToStack(HI), c.PushToStack(LO), c.SetPC)
-			case "PUSH":
-				c.PushToFuncQueue(c.PushToStack(HI), c.PushToStack(LO))
-			case "POP":
-				c.PushToFuncQueue(c.PopFromStack(LO), c.PopFromStack(HI), c.SetRegister)
-			case "DAA":
-
-				c.PushToFuncQueue(c.DAA)
-			case "CCF":
-				c.PushToFuncQueue(c.CCF)
-			case "PREFIX":
-				c.PushToFuncQueue(c.Prefix)
-				// c.handlePrefix()
-			default:
-				inst := c.inst
-				log.Panicf("unimplemented op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", inst.Op, c.IR, inst.DataType, inst.To, inst.From, inst.Flag)
-			}
-		}
 		// }
 	} else {
 		// log.Fatalf("halted, TODO: handle this")
+    c.CheckInterrupts()
 	}
 
-	c.CheckInterrupts() // Before or after reading op?
 }
 
-func (c *CPU) handlePrefix() {
-	c.FetchIR()
-	c.inst = lookup(c.IR, true)
+func (c *CPU) DecodePrefix() {
+	// if intr := c.FetchIR(true); intr {
+	// 	return
+	// }
+  // Should interrupts be checked after prefix?
+  // Wouldn't that cause incorrect functions to run after a RET?
+	c.FetchIR(true)
 
-	if c.inst.To == mHL {
-		c.PushToFuncQueue(c.Read)
-	} else {
-		c.Read()
-	}
+  c.opFunc = func() {
+    if c.curCycle == 0 {
+      c.Read()
+    }
 
-	switch c.inst.Op {
-	case "SWAP":
-		// Swap the 2 nibbles of 8 bit register
-		c.PushToFuncQueue(c.Swap)
-	case "BIT":
-		c.PushToFuncQueue(c.Bit)
-	case "RES":
-		c.PushToFuncQueue(c.Res)
-	case "SET":
-		c.PushToFuncQueue(c.Set)
-	case "SRA":
-		c.PushToFuncQueue(c.SRA)
-	case "SLA":
-		c.PushToFuncQueue(c.SLA)
-	case "SRL":
-		c.PushToFuncQueue(c.SRL)
-	case "RR":
-		c.PushToFuncQueue(c.RR)
-	case "RRC":
-		c.PushToFuncQueue(c.RRC)
-	case "RL":
-		c.PushToFuncQueue(c.RL)
-	case "RLC":
-		c.PushToFuncQueue(c.RLC)
-	default:
-		log.Panicf("unimplemented PREFIXED op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", c.inst.Op, c.IR, c.inst.DataType, c.inst.To, c.inst.From, c.inst.Flag)
-	}
+    if c.curCycle == 1 || c.inst.To != mHL {
+      switch c.inst.Op {
+      case "SWAP":
+        c.Swap()
+      case "BIT":
+        c.Bit()
+      case "RES":
+        c.Res()
+      case "SET":
+        c.Set()
+      case "SRA":
+        c.SRA()
+      case "SLA":
+        c.SLA()
+      case "SRL":
+        c.SRL()
+      case "RR":
+        c.RR()
+      case "RRC":
+        c.RRC()
+      case "RL":
+        c.RL()
+      case "RLC":
+        c.RLC()
+      default:
+        log.Panicf("unimplemented PREFIXED op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", c.inst.Op, c.IR, c.inst.DataType, c.inst.To, c.inst.From, c.inst.Flag)
+      }
 
-	if c.inst.To == mHL {
-		c.PushToFuncQueue(c.Write)
-	} else {
-		c.PushToFuncQueue(c.SetRegister)
-	}
+      if c.inst.To != mHL {
+        c.SetRegister()
+        c.DecodeOp()
+      }
+    }
+
+    if c.curCycle == 2 {
+      c.Write()
+      c.DecodeOp()
+    }
+  }
 }
 
-func (c *CPU) CheckInterrupts() {
+func (c *CPU) CheckInterrupts() (interrupted bool) {
 	// According to a reddit comment, normal cpu cycle is T-cycle 1, but interrupt checks are during T3?
 	// Check interrupt bytes
 	if c.IF != 0 && c.IE != 0 {
-		c.bus.halted = false
+		c.bus.setHalt(false)
 		if c.IME == 1 {
 			for bit := 0; bit <= 4; bit++ {
-				if isBitSet(bit, c.IF) && isBitSet(bit, c.IE) {
+				if utils.IsBitSet(bit, c.IF) && utils.IsBitSet(bit, c.IE) {
 					// c.interruptStep = 5
 					c.IME = 0
 					c.interruptAddr = c.interruptAddresses[bit]
-					c.IF = resetBit(bit, c.IF)
+					c.IF = utils.ResetBit(bit, c.IF)
 
-					// TODO, if interrupted instruction needs to be remembered, this will need to be tweaked.
 					c.IR = 0xC7 // RST
 					c.inst = lookup(c.IR, false)
 					c.inst.Op = "INT"
 					// c.inst.Abs = c.interruptAddr
-					c.WZ = joinBytes(0x00, c.interruptAddr)
+					c.WZ = utils.JoinBytes(0x00, c.interruptAddr)
 
-					// interrupt funcs
-					c.funcQueue = []func(){}
-					c.PushToFuncQueue(
-						c.Nop, c.Nop,
-						c.PushToStack(HI), c.PushToStack(LO),
-						c.SetPC,
-					)
-					return
-					// log.Panicf("interrupted %d", len(c.funcQueue))
+					// interrupt transition
+					c.opFunc = c.MoveToInterrupt
+					return true
 				}
 			}
 		}
 	}
+	return false
+}
+
+func (c *CPU) MoveToInterrupt() {
+	// TODO, should Bank 0 be forced back to default?
+	switch c.curCycle {
+	case 0:
+		// NOP
+	case 1:
+		// NOP
+		c.decrementReg(SP)
+	case 2:
+		c.pushPCToStack(HI)
+		c.decrementReg(SP)
+	case 3:
+		c.pushPCToStack(LO)
+	case 4:
+		c.SetPC()
+    c.DecodeOp()
+	}
+}
+
+func (c *CPU) setCPFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.CPn
+	} else if c.inst.From == mHL {
+		c.opFunc = c.CPmhl
+	} else {
+		c.opFunc = c.CPr
+	}
+}
+
+// Compare with register
+func (c *CPU) CPr() {
+	// c.ReadReg()
+	c.Read()
+	c.compare()
+	c.DecodeOp()
+}
+
+// CP [HL]
+func (c *CPU) CPmhl() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.compare()
+		c.DecodeOp()
+	}
+}
+
+// CP n8
+func (c *CPU) CPn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.compare()
+		c.DecodeOp()
+	}
+}
+
+// Subtract c.Z from c.A and set flags. Do not store result in c.A.
+func (c *CPU) compare() {
+	c.sub(c.A, c.readR8(Z), false)
+}
+
+func (c *CPU) setJPFunc() {
+	switch c.inst.DataType {
+	case A16:
+		// if c.inst.Flag == NOFLAG {
+		// 	c.opFunc = c.JPDirectNoConditional
+		// } else {
+		// 	c.opFunc = c.JPDirectWithConditional
+		// }
+    c.opFunc = c.JPDirect
+	case NODATA:
+		c.opFunc = c.JPhl
+	default:
+		log.Panicf("unhandled JP datatype")
+	}
 
 }
 
-func (c *CPU) PushToFuncQueue(fns ...func()) {
-	c.funcQueue = append(c.funcQueue, fns...)
+func (c *CPU) JPDirectNoConditional() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Fetch(HI)
+	case 2:
+		c.SetPC()
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) JPDirect() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Fetch(HI)
+		c.CheckFlag()
+	case 2:
+		if c.FlagMatches() {
+			c.SetPC()
+		} else {
+			c.DecodeOp()
+		}
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) JPhl() {
+	c.PC = c.HL
+	c.DecodeOp()
+}
+
+func (c *CPU) JR() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+		c.CheckFlag()
+	case 1:
+		if c.FlagMatches() {
+			c.AddRelPC()
+		} else {
+			c.DecodeOp()
+		}
+	case 2:
+		c.SetPC()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) setORFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.ORn
+	} else if c.inst.From == mHL {
+		c.opFunc = c.ORmhl
+	} else {
+		c.opFunc = c.ORr
+	}
+}
+
+func (c *CPU) ORr() {
+	c.Read()
+	c.Or()
+	c.DecodeOp()
+}
+
+func (c *CPU) ORmhl() {
+	switch c.curCycle {
+	case 0:
+		c.Read()
+	case 1:
+		c.Or()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) ORn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Or()
+		c.DecodeOp()
+	}
+}
+
+// OR two bytes A and x and store result in A.
+func (c *CPU) Or() {
+	c.A |= c.readR8(Z)
+	c.clearFlags()
+	c.setZFlag(c.A)
+}
+
+func (c *CPU) setXORFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.XORn
+	} else if c.inst.From == mHL {
+		c.opFunc = c.XORmhl
+	} else {
+		c.opFunc = c.XORr
+	}
+}
+
+func (c *CPU) XORr() {
+	c.Read()
+	c.Xor()
+	c.DecodeOp()
+}
+
+func (c *CPU) XORmhl() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.Xor()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) XORn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Xor()
+		c.DecodeOp()
+	}
+}
+
+// XOR two bytes A and x and store result in A.
+func (c *CPU) Xor() {
+	c.A ^= c.readR8(Z)
+	c.clearFlags()
+	c.setZFlag(c.A)
+}
+
+func (c *CPU) setLDFunc() {
+	// dt := c.inst.DataType
+	t := c.inst.To
+	f := c.inst.From
+
+	if c.IR&0xC0 == 0x40 {
+		if c.IR&0x7 == 0x6 {
+			// 01xxx110
+			// LD r (HL)
+			c.opFunc = func() {
+				switch c.curCycle {
+				case 0:
+					c.Read()
+				case 1:
+					c.SetRegister()
+					c.DecodeOp()
+				}
+			}
+		} else if (c.IR>>3)&0x7 == 0x6 {
+			// 01110xxx
+			// LD (HL) r
+			c.opFunc = func() {
+				switch c.curCycle {
+				case 0:
+					c.Read()
+				case 1:
+					c.writeIndirect(mHL, c.readR8(Z))
+					c.DecodeOp()
+				}
+			}
+		} else {
+			// 01xxxyyy
+			// Ld r r'
+			c.opFunc = func() {
+				c.writeR8(t, c.readR8(f))
+				c.DecodeOp()
+			}
+		}
+		return
+	} else if c.IR&0xC7 == 0x06 {
+		// 00xxx110
+		// LD r n
+		c.opFunc = c.LDn
+		return
+	} else if c.IR&0xCF == 0x1 {
+		// 00xx0001
+		// LD rr nn
+		c.opFunc = c.LDnn
+		return
+	}
+
+	// 0x2 == ld (rr) a
+	// 0xa == ld a (rr)
+	// if 0x2 || 0xa, then
+	//  0x0x == BC
+	//  0x1x == DE
+	//  0x2x == HL+
+	//  0x3x == HL-
+	switch c.IR {
+	case 0x02:
+		// LD (BC) A
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				// (bc) <- a
+				c.writeMem(c.BC, c.A)
+			case 1:
+				c.DecodeOp()
+			}
+		}
+	case 0x08:
+		// LD (a16) SP
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Fetch(LO)
+			case 1:
+				c.Fetch(HI)
+			case 2:
+				c.writeMem(c.WZ, utils.LSB(c.SP))
+				c.WZ = c.IDUInc(c.WZ)
+			case 3:
+				c.writeMem(c.WZ, utils.MSB(c.SP))
+			case 4:
+				c.DecodeOp()
+			}
+		}
+	case 0x0A:
+		// LD A (BC)
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Read()
+			case 1:
+				c.SetRegister()
+				c.DecodeOp()
+			}
+		}
+	case 0x12:
+		// LD (DE) A
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				// (de) <- a
+				c.writeMem(c.DE, c.A)
+			case 1:
+				c.DecodeOp()
+			}
+		}
+	case 0x1A:
+		// LD A (DE)
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Read()
+			case 1:
+				c.SetRegister()
+				c.DecodeOp()
+			}
+		}
+	case 0x22:
+		// LD (HL+) A
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Read()
+				c.Write()
+				c.incrementReg(HL)
+			case 1:
+				c.DecodeOp()
+			}
+		}
+	case 0x2A:
+		// LD A (HL+)
+		c.opFunc = c.LDHLPlus
+	case 0x32:
+		// LD (HL-) A
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Read()
+				c.Write()
+				c.decrementReg(HL)
+			case 1:
+				c.DecodeOp()
+			}
+		}
+	case 0x36:
+		// LD (HL) n
+		panic("ld (hl) n")
+	case 0x3A:
+		// LD A (HL-)
+		c.opFunc = c.LDHLMinus
+	case 0xE2:
+		// LD (C) a
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.writeIndirect(mC, c.A)
+			case 1:
+				c.DecodeOp()
+			}
+		}
+	case 0xEA:
+		// LD (nn) A
+		c.opFunc = c.LDDirectA
+  case 0xF2:
+		// LD a (C)
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+    		c.writeR8(Z, c.readIndirect(mC))
+			case 1:
+				c.A = utils.LSB(c.WZ)
+				c.DecodeOp()
+			}
+		}
+	case 0xF8:
+		// LD HL SP+e8
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Fetch(LO)
+			case 1:
+				res, hc, carry := c.AddSignedToUnsigned(utils.LSB(c.SP), utils.LSB(c.WZ))
+				c.writeR8(L, res)
+        c.clearFlags()
+				c.setHalfCarry(hc)
+				c.setCarry(carry)
+
+			case 2:
+				res := c.Adjust(utils.MSB(c.SP), c.getCarry())
+				c.writeR8(H, res)
+				c.DecodeOp()
+			}
+		}
+	case 0xF9:
+		c.opFunc = c.LDSPHL
+	case 0xFA:
+		// LD A (nn)
+		c.opFunc = func() {
+			switch c.curCycle {
+			case 0:
+				c.Fetch(LO)
+			case 1:
+				c.Fetch(HI)
+			case 2:
+				c.Read()
+			case 3:
+				c.SetRegister()
+				c.DecodeOp()
+			}
+		}
+	default:
+		log.Panicf("OP: %02X, LD %s %s not implemented", c.IR, c.inst.To, c.inst.From)
+	}
+}
+
+func (c *CPU) LDSPHL() {
+	switch c.curCycle {
+	case 0:
+		c.SP = c.HL
+	case 1:
+		c.DecodeOp()
+	}
+
+}
+
+func (c *CPU) LDn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.SetRegister()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) LDnn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Fetch(HI)
+	case 2:
+		c.SetRegister()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) LDDirectA() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Fetch(HI)
+	case 2:
+		c.writeMem(c.readR16(WZ), c.readR8(A))
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) LDHLPlus() {
+	switch c.curCycle {
+	case 0:
+		c.Read()
+		c.incrementReg(HL)
+	case 1:
+		c.SetRegister()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) LDHLMinus() {
+	switch c.curCycle {
+	case 0:
+		c.Read()
+		c.decrementReg(HL)
+	case 1:
+		c.SetRegister()
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) setLDHFunc() {
+	if c.inst.To == m8 {
+		c.opFunc = c.LDHToMem
+	} else {
+		c.opFunc = c.LDHFromMem
+	}
+}
+
+func (c *CPU) LDHToMem() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.writeMem(utils.JoinBytes(0xFF, c.readR8(Z)), c.readR8(A))
+	case 2:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) LDHFromMem() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		val := c.readMem(utils.JoinBytes(0xFF, c.readR8(Z)))
+		c.writeR8(Z, val)
+	case 2:
+    c.A = utils.LSB(c.WZ)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) INC() {
+	if c.inst.To == mHL {
+		switch c.curCycle {
+		case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+		case 1:
+			c.incrementReg(Z)
+		case 2:
+			c.writeIndirect(mHL, c.readR8(Z))
+			c.DecodeOp()
+		}
+	} else if c.regType(c.inst.To) == R16 {
+		switch c.curCycle {
+		case 0:
+			c.writeR16(c.inst.To, c.IDUInc(c.readR16(c.inst.To)))
+		case 1:
+			c.DecodeOp()
+		}
+	} else {
+		c.incrementReg(c.inst.To)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) DEC() {
+	if c.inst.To == mHL {
+		switch c.curCycle {
+		case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+		case 1:
+			c.decrementReg(Z)
+		case 2:
+			c.writeIndirect(mHL, c.readR8(Z))
+			c.DecodeOp()
+		}
+	} else if c.regType(c.inst.To) == R16 {
+		switch c.curCycle {
+		case 0:
+			c.writeR16(c.inst.To, c.IDUDec(c.readR16(c.inst.To)))
+		case 1:
+			c.DecodeOp()
+		}
+	} else {
+		c.decrementReg(c.inst.To)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) setADDFunc() {
+	hi := c.IR >> 4
+	if hi <= 3 {
+		// Add HL rr
+		c.opFunc = c.AddHLrr
+	} else if hi == 8 {
+		if c.IR&0xF == 6 {
+			// Add A [HL]
+			c.opFunc = c.AddmHL
+		} else {
+			// Add A r
+			c.opFunc = c.AddR8
+		}
+	} else if c.IR == 0xC6 {
+		// Add A n8
+		c.opFunc = c.Addn
+	} else if c.IR == 0xE8 {
+		// Add SP e8
+		c.opFunc = c.AddSPe8
+	} else {
+		panic("unhandled ADD")
+	}
+}
+
+func (c *CPU) AddHLrr() {
+	switch c.curCycle {
+	case 0:
+		// add lo
+    // Z Flag must be preserved for tests to pass
+    zFlag := c.getZFlag()
+		rr := c.readR16(c.inst.From)
+		l := c.add(utils.LSB(c.HL), utils.LSB(rr), false)
+		c.writeR8(L, l)
+    c.setZFlag(zFlag)
+	case 1:
+		// add hi
+    zFlag := c.getZFlag()
+		rr := c.readR16(c.inst.From)
+		h := c.add(utils.MSB(c.HL), utils.MSB(rr), true)
+		c.writeR8(H, h)
+    c.setZFlag(zFlag)
+		c.DecodeOp()
+	}
+
+}
+
+func (c *CPU) AddmHL() {
+	switch c.curCycle {
+	case 0:
+		// Z <- mem[HL]
+		c.Read()
+	case 1:
+		// A <- A + Z
+		c.A = c.add(c.A, utils.LSB(c.WZ), false)
+		c.DecodeOp()
+	}
+
+}
+
+func (c *CPU) AddR8() {
+	// A <- A + r
+	c.Read()
+	c.A = c.add(c.A, utils.LSB(c.WZ), false)
+	c.DecodeOp()
+
+}
+
+func (c *CPU) Addn() {
+	switch c.curCycle {
+	case 0:
+		// Z <- mem[PC]
+		c.Fetch(LO)
+	case 1:
+		// A <- A + Z
+		c.A = c.add(c.A, utils.LSB(c.WZ), false)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) AddSPe8() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		res, hc, carry := c.AddSignedToUnsigned(utils.LSB(c.SP), utils.LSB(c.WZ))
+		c.writeR8(Z, res)
+    c.clearFlags()
+		c.setHalfCarry(hc)
+		c.setCarry(carry)
+
+	case 2:
+		res := c.Adjust(utils.MSB(c.SP), c.getCarry())
+		c.writeR8(W, res)
+	case 3:
+		c.SP = c.WZ
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) setADCFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.adcn
+	} else {
+		if c.inst.From == mHL {
+			c.opFunc = c.adcIndirect
+		} else {
+			c.opFunc = c.adcr
+		}
+	}
+}
+
+func (c *CPU) adcn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.A = c.add(c.A, c.readR8(Z), true)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) adcIndirect() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.A = c.add(c.A, c.readR8(Z), true)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) adcr() {
+	c.A = c.add(c.A, c.readR8(c.inst.From), true)
+	c.DecodeOp()
+}
+
+func (c *CPU) setSUBFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.subn
+	} else {
+		if c.inst.From == mHL {
+			c.opFunc = c.subIndirect
+		} else {
+			c.opFunc = c.subr
+		}
+	}
+}
+
+func (c *CPU) subn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.A = c.sub(c.A, c.readR8(Z), false)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) subIndirect() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.A = c.sub(c.A, c.readR8(Z), false)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) subr() {
+	c.A = c.sub(c.A, c.readR8(c.inst.From), false)
+	c.DecodeOp()
+}
+
+func (c *CPU) setSBCFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.sbcn
+	} else {
+		if c.inst.From == mHL {
+			c.opFunc = c.sbcIndirect
+		} else {
+			c.opFunc = c.sbcr
+		}
+	}
+}
+
+func (c *CPU) sbcn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.A = c.sub(c.A, c.readR8(Z), true)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) sbcIndirect() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.A = c.sub(c.A, c.readR8(Z), true)
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) sbcr() {
+	c.A = c.sub(c.A, c.readR8(c.inst.From), true)
+	c.DecodeOp()
+}
+
+func (c *CPU) setANDFunc() {
+	if c.inst.DataType == N8 {
+		c.opFunc = c.andn
+	} else {
+		if c.inst.From == mHL {
+			c.opFunc = c.andIndirect
+		} else {
+			c.opFunc = c.andr
+		}
+	}
+}
+
+func (c *CPU) andn() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.A = c.and(c.A, c.readR8(Z))
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) andIndirect() {
+	switch c.curCycle {
+	case 0:
+		c.writeR8(Z, c.readIndirect(mHL))
+	case 1:
+		c.A = c.and(c.A, c.readR8(Z))
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) andr() {
+	c.A = c.and(c.A, c.readR8(c.inst.From))
+	c.DecodeOp()
 }
 
 // Set intermediate registers W/Z to value from a certain source, usually specified in Instruction
@@ -466,7 +1030,7 @@ func (c *CPU) Read() {
 	case DIRECT:
 		var addr uint16
 		if c.inst.From == m8 {
-			addr = joinBytes(0xFF, c.readR8(Z))
+			addr = utils.JoinBytes(0xFF, c.readR8(Z))
 		} else {
 			addr = c.readR16(WZ)
 		}
@@ -479,26 +1043,136 @@ func (c *CPU) Read() {
 }
 
 // Read next byte and increment PC
-func (c *CPU) Fetch(hilo register) func() {
-	return func() {
-		if hilo == HI {
-			c.writeR8(W, c.imm8())
-		} else if hilo == LO {
-			c.writeR8(Z, c.imm8())
-		}
+func (c *CPU) Fetch(hilo register) {
+	if hilo == HI {
+		c.writeR8(W, c.imm8())
+	} else if hilo == LO {
+		c.writeR8(Z, c.imm8())
 	}
 }
 
-func (c *CPU) FetchIR() {
+func (c *CPU) FetchIR(prefix bool) (interrupted bool) {
+
+	c.curCycle = 0xFF // after fetch, will be incremented to 0
+
+	if !prefix && c.CheckInterrupts() {
+		return true
+	}
+
 	c.IR = c.imm8()
-	c.inst = lookup(c.IR, false)
+
+	c.inst = lookup(c.IR, prefix)
+
+
+	return false
+}
+
+func (c *CPU) DecodeOp() {
+	if intr := c.FetchIR(false); intr {
+		return
+	}
+
+  c.SetOpFunc()
+
+}
+
+func (c *CPU) SetOpFunc() {
+  	switch c.inst.Op {
+	case "STOP":
+		// c.bus.halted = true
+		// c.bus.DIV = 0
+		c.opFunc = c.NOP
+		// TODO, STOP does a lot more than NOP, but this is here just to pass blargg's cpu_instrs test. CGB needs it for speed switching, DMG not so much.
+	case "NOP":
+		c.opFunc = c.NOP
+	case "HALT":
+		// Pause CPU until interrupt pending.
+
+		// TODO
+		// Documented "halt bug",
+		// If IME == 0, but IE & IF != 0, halt ends immediately but PC does not increment
+		// causing the following instruction to be read twice.
+		// If halt comes immediately after ei, the return from the interrupt handler will be the halt command again
+		// If halt is followed by rst, rst will return to itself
+    c.opFunc = func(){
+  		c.bus.setHalt(true)
+      c.DecodeOp()
+    }
+    
+	case "CP":
+		c.setCPFunc()
+	case "JP":
+		c.setJPFunc()
+	case "JR":
+		c.opFunc = c.JR
+	case "OR":
+		c.setORFunc()
+	case "XOR":
+		c.setXORFunc()
+	case "LD":
+		c.setLDFunc()
+	case "LDH":
+		c.setLDHFunc()
+	case "INC":
+		c.opFunc = c.INC
+	case "DEC":
+		c.opFunc = c.DEC
+	case "ADD":
+		c.setADDFunc()
+	case "ADC":
+		c.setADCFunc()
+	case "SUB":
+		c.setSUBFunc()
+	case "SBC":
+		c.setSBCFunc()
+	case "AND":
+		c.setANDFunc()
+	case "RRA":
+		c.opFunc = c.RRA
+	case "RRCA":
+		c.opFunc = c.RRCA
+	case "RLA":
+		c.opFunc = c.RLA
+	case "RLCA":
+		c.opFunc = c.RLCA
+	case "CPL":
+		c.opFunc = c.CPL
+	case "SCF":
+		c.opFunc = c.SCF
+	case "EI":
+		c.opFunc = c.SetIME
+	case "DI":
+		c.opFunc = c.UnsetIME
+	case "CALL":
+		c.opFunc = c.CALL
+	case "RET":
+		c.SetRETFunc()
+	case "RETI":
+		c.opFunc = c.RETI
+	case "RST":
+		c.opFunc = c.RST
+	case "PUSH":
+		c.opFunc = c.PUSH
+	case "POP":
+		c.opFunc = c.POP
+	case "DAA":
+		c.opFunc = c.DAA
+	case "CCF":
+		c.opFunc = c.CCF
+	case "PREFIX":
+		c.opFunc = c.DecodePrefix
+	default:
+		inst := c.inst
+		log.Panicf("unimplemented op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", inst.Op, c.IR, inst.DataType, inst.To, inst.From, inst.Flag)
+	}
+
 }
 
 // Write a byte to a specific memory location.
 func (c *CPU) Write() {
 	tt := c.regType(c.inst.To)
 	if c.inst.To == m8 {
-		c.writeMem(joinBytes(0xFF, c.readR8(Z)), c.readR8(A))
+		c.writeMem(utils.JoinBytes(0xFF, c.readR8(Z)), c.readR8(A))
 		// } else if c.inst.To == m16 {
 
 		// }
@@ -514,112 +1188,11 @@ func (c *CPU) Write() {
 func (c *CPU) WriteSP(hilo string) func() {
 	return func() {
 		if hilo == HI {
-			c.writeMem(c.readR16(WZ)+1, msb(c.SP))
+			c.writeMem(c.readR16(WZ)+1, utils.MSB(c.SP))
 		} else if hilo == LO {
-			c.writeMem(c.readR16(WZ), lsb(c.SP))
+			c.writeMem(c.readR16(WZ), utils.LSB(c.SP))
 		}
 	}
-}
-
-// Do nothing for one cycle
-func (c *CPU) Nop() {
-	// Empty
-}
-
-// Add c.Z to c.A and set flags. Store result in c.A.
-func (c *CPU) Add() {
-	c.A = c.addAndSetFlags(c.A, lsb(c.WZ))
-}
-
-// Add low byte of rr to low byte of inst.To and set flags.
-func (c *CPU) AddLo() {
-	aLo := lsb(c.readR16(c.inst.To))
-	bLo := lsb(c.readR16(c.inst.From))
-	// Replace only low byte of inst.To
-	// TODO, docs don't mention Z flag. Preserve it?
-	z := getBit(7, c.F)
-	c.writeR16(c.inst.To, joinBytes(msb(c.readR16(c.inst.To)), c.addAndSetFlags(aLo, bLo)))
-	c.setZFlag(z)
-}
-
-// Add high byte of rr to high byte of inst.To and set flags.
-func (c *CPU) AddHi() {
-	aHi := msb(c.readR16(c.inst.To))
-	bHi := msb(c.readR16(c.inst.From))
-	// TODO, same as above
-	z := getBit(7, c.F)
-	c.writeR16(c.inst.To, joinBytes(c.addWithCarryAndSetFlags(aHi, bHi), lsb(c.readR16(c.inst.To))))
-	c.setZFlag(z)
-}
-
-// Add c.Z and carry to c.A and set flags. Store result in c.A.
-func (c *CPU) Adc() {
-	c.A = c.addWithCarryAndSetFlags(c.A, lsb(c.WZ))
-}
-
-// Subtract c.Z from c.A and set flags. Store result in c.A.
-func (c *CPU) Sub() {
-	c.A = c.subAndSetFlags(c.A, lsb(c.WZ))
-}
-
-// Subtract c.Z and carry from c.A and set flags. Store result in c.A.
-func (c *CPU) Sbc() {
-	c.A = c.subWithCarryAndSetFlags(c.A, lsb(c.WZ))
-}
-
-// Subtract c.Z from c.A and set flags. Do not store result in c.A.
-func (c *CPU) Compare() {
-	c.subAndSetFlags(c.A, lsb(c.WZ))
-}
-
-// Set the PC register to value of WZ.
-func (c *CPU) SetPC() {
-	c.PC = c.WZ
-	// c.WZ = 0
-}
-
-// Add a signed byte to PC.
-func (c *CPU) AddRelPC() {
-	c.addrBusFull = true
-	c.dataBusFull = true
-	c.IDUBusy = true
-	c.ALUBusy = true
-	c.WZ, _ = addInt8ToUint16(c.readR8(Z), c.PC)
-}
-
-// Add a signed byte to SP.
-func (c *CPU) AddRelSP() {
-	c.addrBusFull = true
-	c.dataBusFull = true
-	c.IDUBusy = true
-	c.ALUBusy = true
-	res, flags := addInt8ToUint16(c.readR8(Z), c.SP)
-	c.WZ = res
-	c.clearFlags()
-	c.setHalfCarry(getBit(5, flags))
-	c.setCarry(getBit(4, flags))
-}
-
-// OR two bytes A and x and store result in A.
-func (c *CPU) Or() {
-	c.A |= c.readR8(Z)
-	c.clearFlags()
-	c.setZFlag(c.A)
-}
-
-// XOR two bytes A and x and store result in A.
-func (c *CPU) Xor() {
-	c.A ^= c.readR8(Z)
-	c.clearFlags()
-	c.setZFlag(c.A)
-}
-
-// AND two bytes A and x and store result in A.
-func (c *CPU) AND() {
-	c.A &= c.readR8(Z)
-	c.clearFlags()
-	c.setZFlag(c.A)
-	c.setHalfCarry(1)
 }
 
 // Set a certain register to the value of W/Z.
@@ -644,7 +1217,6 @@ func (c *CPU) SetRegister() {
 			c.writeR8(c.inst.To, c.readR8(Z))
 		}
 	case R16:
-		c.miscOp = true
 		c.writeR16(c.inst.To, c.readR16(WZ))
 		// c.WZ = 0
 	case INDIRECT:
@@ -654,69 +1226,163 @@ func (c *CPU) SetRegister() {
 	}
 }
 
-// Increment a register or byte in memory
-func (c *CPU) INC() {
-	if c.inst.To == mHL {
-		c.IncR(Z)
-	} else {
-		c.IncR(c.inst.To)
-	}
+// Do nothing for one cycle
+func (c *CPU) NOP() {
+	c.DecodeOp()
 }
 
-// Decrement a register or byte in memory
-func (c *CPU) DEC() {
-	if c.inst.To == mHL {
-		c.DecR(Z)
-	} else {
-		c.DecR(c.inst.To)
-	}
+// Set the PC register to value of WZ.
+func (c *CPU) SetPC() {
+	c.PC = c.WZ
+}
+
+// Add a signed byte to PC.
+func (c *CPU) AddRelPC() {
+	z, _, carry := c.AddSignedToUnsigned(utils.LSB(c.PC), utils.LSB(c.WZ))
+	w := c.Adjust(utils.MSB(c.PC), carry)
+	c.WZ = utils.JoinBytes(w, z)
 }
 
 // Set IME to 1
 func (c *CPU) SetIME() {
-	c.IME = 1
+	c.nextIME = 1
+  c.setIME = true
+	c.DecodeOp()
 }
 
 // Set IME to 0
 func (c *CPU) UnsetIME() {
-	c.IME = 0
+	// c.nextIME = 0
+  // c.setIME = true
+  c.IME = 0
+	c.DecodeOp()
 }
 
-// Push PC register to stack
-func (c *CPU) PushToStack(hilo string) func() {
-	return func() {
-		var data uint16
-		var b byte
-		if c.inst.DataType == NODATA {
-			if c.inst.Op == "RST" || c.inst.Op == "INT" {
-				// data = c.readR16(WZ)
-				data = c.PC
-			} else {
-				data = c.readR16(c.inst.From)
-			}
+func (c *CPU) CALL() {
+	switch c.curCycle {
+	case 0:
+		c.Fetch(LO)
+	case 1:
+		c.Fetch(HI)
+		c.CheckFlag()
+	case 2:
+		if c.FlagMatches() {
+			c.decrementReg(SP)
 		} else {
-			data = c.PC
+			c.DecodeOp()
 		}
-
-		c.SP--
-		if hilo == HI {
-			b = msb(data)
-		} else if hilo == LO {
-			b = lsb(data)
-		}
-		c.writeMem(c.readR16(SP), b)
+	case 3:
+		c.pushPCToStack(HI)
+		c.decrementReg(SP)
+	case 4:
+		c.pushPCToStack(LO)
+		c.SetPC()
+	case 5:
+		c.DecodeOp()
 	}
 }
 
-// Pop 16 bit register from stack
-func (c *CPU) PopFromStack(hilo string) func() {
-	return func() {
-		if hilo == HI {
-			c.writeR8(W, c.readMem(c.SP))
-		} else if hilo == LO {
-			c.writeR8(Z, c.readMem(c.SP))
+func (c *CPU) SetRETFunc() {
+	if c.inst.Flag == NOFLAG {
+		c.opFunc = c.RET
+	} else {
+		c.opFunc = c.RETWithConditional
+	}
+}
+
+func (c *CPU) RET() {
+	switch c.curCycle {
+	case 0:
+		c.popFromStack(LO)
+		c.incrementReg(SP)
+	case 1:
+		c.popFromStack(HI)
+		c.incrementReg(SP)
+	case 2:
+		c.SetPC()
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) RETWithConditional() {
+	switch c.curCycle {
+	case 0:
+		c.CheckFlag()
+	case 1:
+		if c.FlagMatches() {
+			c.popFromStack(LO)
+			c.incrementReg(SP)
+		} else {
+			c.DecodeOp()
 		}
-		c.SP++
+	case 2:
+		c.popFromStack(HI)
+		c.incrementReg(SP)
+	case 3:
+		c.SetPC()
+	case 4:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) RETI() {
+	switch c.curCycle {
+	case 0:
+		c.popFromStack(LO)
+		c.incrementReg(SP)
+	case 1:
+		c.popFromStack(HI)
+		c.incrementReg(SP)
+	case 2:
+		c.SetPC()
+		c.IME = 1
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) RST() {
+	switch c.curCycle {
+	case 0:
+		c.decrementReg(SP)
+	case 1:
+		c.pushPCToStack(HI)
+		c.decrementReg(SP)
+	case 2:
+		c.pushPCToStack(LO)
+		c.writeR16(WZ, utils.JoinBytes(0x00, c.inst.Abs))
+		c.SetPC()
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) PUSH() {
+	switch c.curCycle {
+	case 0:
+		c.decrementReg(SP)
+	case 1:
+		c.pushToStack(HI)
+		c.decrementReg(SP)
+	case 2:
+		c.pushToStack(LO)
+	case 3:
+		c.DecodeOp()
+	}
+}
+
+func (c *CPU) POP() {
+	switch c.curCycle {
+	case 0:
+		c.popFromStack(LO)
+		c.incrementReg(SP)
+	case 1:
+		c.popFromStack(HI)
+		c.incrementReg(SP)
+	case 2:
+		c.writeR16(c.inst.To, c.WZ)
+		c.DecodeOp()
 	}
 }
 
@@ -726,56 +1392,23 @@ func (c *CPU) PopFromStack(hilo string) func() {
 // In BCD, 0x16 + 0x15 = 0x31
 // DAA makes this adjustment.
 func (c *CPU) DAA() {
-	// lo := c.A & 0xF
-	// hi := c.A >> 4
+  result, carry := c.DecAdj(c.A, c.F)
 
-	result := c.A
-
-	if !isBitSet(6, c.F) {
-		if result > 0x99 || isBitSet(4, c.F) {
-			result += 0x60
-			c.setCarry(1)
-		}
-
-		if result&0xF > 0x9 || isBitSet(5, c.F) {
-			result += 0x6
-		}
-	} else {
-		if isBitSet(4, c.F) {
-			result -= 0x60
-		}
-
-		if isBitSet(5, c.F) {
-			result -= 0x6
-		}
-	}
-
-	// Check Z and C, set HC to 0
 	c.setHalfCarry(0)
-	// if result < c.A {
-	// 	c.setCarry(1)
-	// } else {
-	// 	c.setCarry(0)
-	// }
+  c.setCarry(carry)
 
 	c.setZFlag(result)
 	c.A = result
+
+	c.DecodeOp()
 }
 
 // Complement Carry Flag
 func (c *CPU) CCF() {
 	c.setNegFlag(0)
 	c.setHalfCarry(0)
-	if c.getCarry() == 1 {
-		c.setCarry(0)
-	} else {
-		c.setCarry(1)
-	}
-}
-
-// Prefix() is like Cycle() but checks prefix lookup table instead
-func (c *CPU) Prefix() {
-	c.handlePrefix()
+	c.setCarry(1 - c.getCarry())
+	c.DecodeOp()
 }
 
 // PREFIX FUNCS
@@ -783,7 +1416,7 @@ func (c *CPU) Prefix() {
 // Swap hi and lo nibbles of byte
 func (c *CPU) Swap() {
 	r := c.readR8(Z)
-	swapped := (r << 4) | (r >> 4)
+  swapped := c.ALUSwap(r)
 	c.writeR8(Z, swapped)
 	c.clearFlags()
 	c.setZFlag(swapped)
@@ -793,7 +1426,7 @@ func (c *CPU) Swap() {
 // Check bit of byte
 func (c *CPU) Bit() {
 	r := c.readR8(Z)
-	b := getBit(c.inst.Bit, r)
+	b := utils.GetBit(c.inst.Bit, r)
 	c.setZFlag(b)
 	c.setNegFlag(0)
 	c.setHalfCarry(1)
@@ -804,7 +1437,7 @@ func (c *CPU) Bit() {
 func (c *CPU) Set() {
 	var r byte
 	r = c.readR8(Z)
-	r = setBit(c.inst.Bit, r)
+	r = utils.SetBit(c.inst.Bit, r)
 	c.writeR8(Z, r)
 }
 
@@ -812,17 +1445,17 @@ func (c *CPU) Set() {
 func (c *CPU) Res() {
 	var r byte
 	r = c.readR8(Z)
-	r = resetBit(c.inst.Bit, r)
+	r = utils.ResetBit(c.inst.Bit, r)
 	c.writeR8(Z, r)
 }
 
 // Shift right arithmetic
 func (c *CPU) SRA() {
 	data := c.readR8(Z)
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	data >>= 1
-	if isBitSet(6, data) {
-		data = setBit(7, data)
+	if utils.IsBitSet(6, data) {
+		data = utils.SetBit(7, data)
 	}
 	c.writeR8(Z, data)
 	c.clearFlags()
@@ -833,7 +1466,7 @@ func (c *CPU) SRA() {
 // Shift left arithmetic
 func (c *CPU) SLA() {
 	data := c.readR8(Z)
-	carry := getBit(7, data)
+	carry := utils.GetBit(7, data)
 	data <<= 1
 	c.writeR8(Z, data)
 	c.clearFlags()
@@ -844,7 +1477,7 @@ func (c *CPU) SLA() {
 // Shift right logical, don't wrap bits
 func (c *CPU) SRL() {
 	data := c.readR8(Z)
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	result := data >> 1
 	c.writeR8(Z, result)
 	c.clearFlags()
@@ -852,37 +1485,36 @@ func (c *CPU) SRL() {
 	c.setCarry(carry)
 }
 
-// TODO, rotate circular moves popped bit to other end of byte
-// Non-circular rotate uses carry bit
-// Carry is set for both
-
 // Rotate right accumulator
 func (c *CPU) RRA() {
 	data := c.readR8(A)
 	oldCarry := c.getCarry()
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	result := c.rotateRight(data, oldCarry)
 
 	c.writeR8(A, result)
 	c.clearFlags() // TODO, docs say Z should be 0. Is this right?
 	c.setCarry(carry)
+
+	c.DecodeOp()
 }
 
 // Rotate right circular accumulator
 func (c *CPU) RRCA() {
 	data := c.readR8(A)
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	result := c.rotateRight(data, carry)
 
 	c.writeR8(A, result)
 	c.clearFlags()
 	c.setCarry(carry)
+	c.DecodeOp()
 }
 
 // Rotate right circular
 func (c *CPU) RRC() {
 	data := c.readR8(Z)
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	result := c.rotateRight(data, carry)
 
 	c.writeR8(Z, result)
@@ -895,7 +1527,7 @@ func (c *CPU) RRC() {
 func (c *CPU) RR() {
 	data := c.readR8(Z)
 	oldCarry := c.getCarry()
-	carry := getBit(0, data)
+	carry := utils.GetBit(0, data)
 	result := c.rotateRight(data, oldCarry)
 
 	c.writeR8(Z, result)
@@ -908,29 +1540,31 @@ func (c *CPU) RR() {
 func (c *CPU) RLA() {
 	data := c.readR8(A)
 	oldCarry := c.getCarry()
-	carry := getBit(7, data)
+	carry := utils.GetBit(7, data)
 	result := c.rotateLeft(data, oldCarry)
 
 	c.writeR8(A, result)
 	c.clearFlags()
 	c.setCarry(carry)
+	c.DecodeOp()
 }
 
 // Rotate left circular accumulator
 func (c *CPU) RLCA() {
 	data := c.readR8(A)
-	carry := getBit(7, data)
+	carry := utils.GetBit(7, data)
 	result := c.rotateLeft(data, carry)
 
 	c.writeR8(A, result)
 	c.clearFlags()
 	c.setCarry(carry)
+	c.DecodeOp()
 }
 
 // Rotate left circular
 func (c *CPU) RLC() {
 	data := c.readR8(Z)
-	carry := getBit(7, data)
+	carry := utils.GetBit(7, data)
 	result := c.rotateLeft(data, carry)
 
 	c.writeR8(Z, result)
@@ -943,7 +1577,7 @@ func (c *CPU) RLC() {
 func (c *CPU) RL() {
 	data := c.readR8(Z)
 	oldCarry := c.getCarry()
-	carry := getBit(7, data)
+	carry := utils.GetBit(7, data)
 	result := c.rotateLeft(data, oldCarry)
 
 	c.writeR8(Z, result)
@@ -957,6 +1591,8 @@ func (c *CPU) CPL() {
 	c.writeR8(A, ^c.readR8(A))
 	c.setNegFlag(1)
 	c.setHalfCarry(1)
+
+	c.DecodeOp()
 }
 
 // Set carry flag
@@ -964,6 +1600,7 @@ func (c *CPU) SCF() {
 	c.setNegFlag(0)
 	c.setHalfCarry(0)
 	c.setCarry(1)
+	c.DecodeOp()
 }
 
 // Functions used by main op funcs
@@ -971,7 +1608,7 @@ func (c *CPU) SCF() {
 // Read the memory address at [PC]
 func (c *CPU) imm8() byte {
 	n8 := c.readMem(c.PC)
-	c.IncR(PC)
+	c.incrementReg(PC)
 	return n8
 }
 
@@ -984,57 +1621,12 @@ func (c *CPU) rotateLeft(data, carry byte) byte {
 
 // Read the memory address at [addr]
 func (c *CPU) readMem(addr uint16) byte {
-	c.addrBusFull = true
-	c.dataBusFull = true
 	return c.bus.Read(addr)
 }
 
 // Write byte to memory address [addr]
 func (c *CPU) writeMem(addr uint16, data byte) {
-	c.addrBusFull = true
-	c.dataBusFull = true
 	c.bus.Write(addr, data)
-}
-
-// Increment register
-func (c *CPU) IncR(r register) {
-	rt := c.regType(r)
-	if rt == R8 {
-		val := c.readR8(r)
-		c.setHalfCarryAdd(val, 1)
-		val = c.ALUInc(val)
-		c.setZFlag(val)
-		c.setNegFlag(0)
-		c.writeR8(r, val)
-	} else {
-		c.writeR16(r, c.IDUInc(c.readR16(r)))
-	}
-}
-
-// Decrement register
-func (c *CPU) DecR(r register) {
-	rt := c.regType(r)
-	if rt == R8 {
-		val := c.readR8(r)
-		// if bit[3] carried, H = 1, else 0
-		c.setHalfCarrySub(val, 1, false)
-		val = c.ALUDec(val)
-		c.setZFlag(val)
-		c.setNegFlag(1)
-		c.writeR8(r, val)
-	} else {
-		c.writeR16(r, c.IDUDec(c.readR16(r)))
-	}
-}
-
-// OLD
-
-// Returns true if flag f is set, else returns false.
-func (c *CPU) FlagIsSet() bool {
-	if c.flagMatches(c.inst.Flag) && c.inst.Flag != NOFLAG {
-		return true
-	}
-	return false
 }
 
 func (c *CPU) regType(reg register) string {
@@ -1048,7 +1640,6 @@ func (c *CPU) regType(reg register) string {
 	case m8, m16:
 		return DIRECT
 	default:
-		// log.Panicf("invalid register %s", reg)
 		return NONE
 	}
 }
@@ -1058,21 +1649,19 @@ func (c *CPU) readR8(reg register) byte {
 	case A:
 		return c.A
 	case B:
-		return msb(c.BC)
+		return utils.MSB(c.BC)
 	case C:
-		return lsb(c.BC)
+		return utils.LSB(c.BC)
 	case D:
-		return msb(c.DE)
+		return utils.MSB(c.DE)
 	case E:
-		return lsb(c.DE)
+		return utils.LSB(c.DE)
 	case H:
-		return msb(c.HL)
+		return utils.MSB(c.HL)
 	case L:
-		return lsb(c.HL)
+		return utils.LSB(c.HL)
 	case Z:
-		// ret := lsb(c.WZ)
-		// c.WZ = joinBytes(msb(c.WZ), 0)
-		return lsb(c.WZ)
+		return utils.LSB(c.WZ)
 	default:
 		log.Panicf("op: %02X, tried to get value from unhandled R8 %s", c.IR, reg)
 	}
@@ -1092,7 +1681,7 @@ func (c *CPU) readR16(reg register) uint16 {
 	case SP:
 		return c.SP
 	case AF:
-		return joinBytes(c.A, c.F)
+		return utils.JoinBytes(c.A, c.F)
 	case WZ:
 		// ret := c.WZ
 		// c.WZ = 0
@@ -1108,7 +1697,7 @@ func (c *CPU) readR16(reg register) uint16 {
 func (c *CPU) readIndirect(reg register) byte {
 	switch reg {
 	case mC:
-		return c.bus.Read(joinBytes(0xFF, lsb(c.BC)))
+		return c.bus.Read(utils.JoinBytes(0xFF, utils.LSB(c.BC)))
 	case mBC:
 		return c.bus.Read(c.BC)
 	case mDE:
@@ -1117,11 +1706,11 @@ func (c *CPU) readIndirect(reg register) byte {
 		return c.bus.Read(c.HL)
 	case mHLp:
 		val := c.bus.Read(c.HL)
-		c.HL = c.IDUInc(c.HL)
+		// c.HL = c.IDUInc(c.HL)
 		return val
 	case mHLm:
 		val := c.bus.Read(c.HL)
-		c.HL = c.IDUDec(c.HL)
+		// c.HL = c.IDUDec(c.HL)
 		return val
 	default:
 		log.Panicf("op: %02X, tried to get value from unhandled indirect %s", c.IR, reg)
@@ -1134,21 +1723,21 @@ func (c *CPU) writeR8(reg register, value byte) {
 	case A:
 		c.A = value
 	case B:
-		c.BC = joinBytes(value, lsb(c.BC))
+		c.BC = utils.JoinBytes(value, utils.LSB(c.BC))
 	case C:
-		c.BC = joinBytes(msb(c.BC), value)
+		c.BC = utils.JoinBytes(utils.MSB(c.BC), value)
 	case D:
-		c.DE = joinBytes(value, lsb(c.DE))
+		c.DE = utils.JoinBytes(value, utils.LSB(c.DE))
 	case E:
-		c.DE = joinBytes(msb(c.DE), value)
+		c.DE = utils.JoinBytes(utils.MSB(c.DE), value)
 	case H:
-		c.HL = joinBytes(value, lsb(c.HL))
+		c.HL = utils.JoinBytes(value, utils.LSB(c.HL))
 	case L:
-		c.HL = joinBytes(msb(c.HL), value)
+		c.HL = utils.JoinBytes(utils.MSB(c.HL), value)
 	case W:
-		c.WZ = joinBytes(value, lsb(c.WZ))
+		c.WZ = utils.JoinBytes(value, utils.LSB(c.WZ))
 	case Z:
-		c.WZ = joinBytes(msb(c.WZ), value)
+		c.WZ = utils.JoinBytes(utils.MSB(c.WZ), value)
 	default:
 		log.Panicf("op: %02X, tried to set value for unhandled R8 %s", c.IR, reg)
 	}
@@ -1167,8 +1756,8 @@ func (c *CPU) writeR16(reg register, value uint16) {
 	case PC:
 		c.PC = value
 	case AF:
-		c.A = msb(value)
-		c.F = lsb(value) & 0xF0
+		c.A = utils.MSB(value)
+		c.F = utils.LSB(value) & 0xF0
 	case WZ:
 		c.WZ = value
 	default:
@@ -1181,123 +1770,47 @@ func (c *CPU) writeIndirect(reg register, value uint8) {
 	case mBC:
 		c.bus.Write(c.BC, value)
 	case mC:
-		c.bus.Write(joinBytes(0xFF, lsb(c.BC)), value)
+		c.bus.Write(utils.JoinBytes(0xFF, utils.LSB(c.BC)), value)
 	case mDE:
 		c.bus.Write(c.DE, value)
 	case mHL:
 		c.bus.Write(c.HL, value)
 	case mHLp:
 		c.bus.Write(c.HL, value)
-		c.HL = c.IDUInc(c.HL)
+		// c.HL = c.IDUInc(c.HL)
 	case mHLm:
 		c.bus.Write(c.HL, value)
-		c.HL = c.IDUDec(c.HL)
+		// c.HL = c.IDUDec(c.HL)
 	default:
 		log.Panicf("op: %02X, tried to set value for unhandled indirect %s", c.IR, reg)
 	}
 }
 
-func (c *CPU) flagMatches(f string) bool {
-	c.miscOp = true
-	switch f {
+// Check if inst.Flag is set, save result for future cycles
+func (c *CPU) CheckFlag() {
+	switch c.inst.Flag {
 	case ZERO:
-		return isBitSet(7, c.F)
+		c.flagMatched = utils.IsBitSet(7, c.F)
 	case NZ:
-		return !isBitSet(7, c.F)
+		c.flagMatched = !utils.IsBitSet(7, c.F)
 	case CARRY:
-		return isBitSet(4, c.F)
+		c.flagMatched = utils.IsBitSet(4, c.F)
 	case NC:
-		return !isBitSet(4, c.F)
+		c.flagMatched = !utils.IsBitSet(4, c.F)
 	case NOFLAG:
-		c.miscOp = false
-		return true
+		c.flagMatched = true
 	default:
-		log.Panicf("unhandled flag check for flag %s", f)
-		return false
+		log.Panicf("unhandled flag check for flag %s", c.inst.Flag)
 	}
+}
+
+// Return value set by CheckFlag()
+func (c *CPU) FlagMatches() bool {
+	return c.flagMatched
 }
 
 func (c *CPU) clearFlags() {
 	c.F &= 0x00
-}
-
-func (c *CPU) addAndSetFlags(a, b byte) byte {
-	result := a + b
-	// set Z flag
-	c.setZFlag(result)
-
-	// set N to 0
-	c.setNegFlag(0)
-
-	// if bit[3] carried, H = 1, else 0
-	c.setHalfCarryAdd(a, b)
-
-	// if bit[7] carried, C = 1, else 0
-	if result < a {
-		c.setCarry(1)
-	} else {
-		c.setCarry(0)
-	}
-
-	return result
-}
-
-func (c *CPU) addWithCarryAndSetFlags(a, b byte) byte {
-	result := a + b + c.getCarry()
-	// set Z flag
-	c.setZFlag(result)
-
-	// set N to 0
-	c.setNegFlag(0)
-
-	// if bit[3] carried, H = 1, else 0
-	halfCarry := ((a ^ b ^ c.getCarry() ^ result) & 0x10) >> 4
-	c.setHalfCarry(halfCarry)
-
-	// if bit[7] carried, C = 1, else 0
-	if result < a || (result == a && c.getCarry() == 1) {
-		c.setCarry(1)
-	} else {
-		c.setCarry(0)
-	}
-
-	return result
-}
-
-func (c *CPU) subAndSetFlags(a, b byte) byte {
-	result := a - b
-	c.setZFlag(result)
-	c.setNegFlag(1)
-
-	// if bit[3] carried, H = 1, else 0
-	c.setHalfCarrySub(a, b, false)
-
-	// if bit[7] carried, C = 1, else 0
-	if result > a {
-		c.setCarry(1)
-	} else {
-		c.setCarry(0)
-	}
-
-	return result
-}
-
-func (c *CPU) subWithCarryAndSetFlags(a, b byte) byte {
-	result := a - b - c.getCarry()
-	c.setZFlag(result)
-	c.setNegFlag(1)
-
-	// if bit[3] carried, H = 1, else 0
-	c.setHalfCarrySub(a, b, true)
-
-	// if bit[7] carried, C = 1, else 0
-	if result > a || (result == a && c.getCarry() == 1) {
-		c.setCarry(1)
-	} else {
-		c.setCarry(0)
-	}
-
-	return result
 }
 
 // Set Zero flag based on given value
@@ -1310,6 +1823,10 @@ func (c *CPU) setZFlag(value byte) {
 	}
 }
 
+func (c *CPU) getZFlag() byte {
+  return utils.GetBit(7, c.F)
+}
+
 func (c *CPU) setNegFlag(to byte) {
 	if to == 0 {
 		c.F &= 0xBF
@@ -1318,11 +1835,11 @@ func (c *CPU) setNegFlag(to byte) {
 	}
 }
 
-func (c *CPU) setHalfCarryAdd(a, b byte) {
-	result := a + b
-	halfCarry := ((a ^ b ^ result) & 0x10) >> 4
-	c.setHalfCarry(halfCarry)
-}
+// func (c *CPU) setHalfCarryAdd(a, b byte) {
+// 	result := a + b
+// 	halfCarry := ((a ^ b ^ result) & 0x10) >> 4
+// 	c.setHalfCarry(halfCarry)
+// }
 
 func (c *CPU) setHalfCarrySub(a, b byte, checkCarry bool) {
 	// result := a - b
@@ -1345,6 +1862,10 @@ func (c *CPU) setHalfCarry(to byte) {
 	}
 }
 
+func (c *CPU) getHalfCarry() byte {
+	return utils.GetBit(5, c.F)
+}
+
 func (c *CPU) setCarry(setTo byte) {
 	if setTo != 0 {
 		c.F |= 0x10
@@ -1354,5 +1875,102 @@ func (c *CPU) setCarry(setTo byte) {
 }
 
 func (c *CPU) getCarry() byte {
-	return getBit(4, c.F)
+	return utils.GetBit(4, c.F)
+}
+
+func (c *CPU) pushToStack(hiOrLo string) {
+	if hiOrLo == HI {
+		c.writeMem(c.SP, utils.MSB(c.readR16(c.inst.From)))
+	} else {
+		c.writeMem(c.SP, utils.LSB(c.readR16(c.inst.From)))
+	}
+}
+
+func (c *CPU) popFromStack(hiOrLo string) {
+	if hiOrLo == HI {
+		c.writeR8(W, c.readMem(c.SP))
+	} else {
+		c.writeR8(Z, c.readMem(c.SP))
+	}
+}
+
+func (c *CPU) pushPCToStack(hiOrLo string) {
+	if hiOrLo == HI {
+		c.writeMem(c.SP, utils.MSB(c.PC))
+	} else {
+		c.writeMem(c.SP, utils.LSB(c.PC))
+	}
+}
+
+func (c *CPU) incrementReg(r register) {
+	rt := c.regType(r)
+	if rt == R8 {
+		in := c.readR8(r)
+		result, hc := c.ALUInc(in)
+		c.setZFlag(result)
+		c.setNegFlag(0)
+		c.setHalfCarry(hc)
+		c.writeR8(r, result)
+	} else if rt == R16 {
+		c.writeR16(r, c.IDUInc(c.readR16(r)))
+	}
+}
+
+func (c *CPU) decrementReg(r register) {
+	rt := c.regType(r)
+	if rt == R8 {
+		in := c.readR8(r)
+		result, hc := c.ALUDec(in)
+		c.setZFlag(result)
+		c.setNegFlag(1)
+		c.setHalfCarry(hc)
+		c.writeR8(r, result)
+	} else if rt == R16 {
+		c.writeR16(r, c.IDUDec(c.readR16(r)))
+	}
+}
+
+func (c *CPU) add(a, b byte, useCarry bool) (result byte) {
+	var hc, newCarry byte
+
+	if useCarry {
+		result, hc, newCarry = c.ALUAdd(a, b, c.getCarry())
+	} else {
+		result, hc, newCarry = c.ALUAdd(a, b, 0)
+	}
+
+	c.setZFlag(result)
+	c.setNegFlag(0)
+	c.setHalfCarry(hc)
+	c.setCarry(newCarry)
+
+	return
+}
+
+func (c *CPU) sub(a, b byte, useCarry bool) (result byte) {
+	carry := c.getCarry()
+	var hc, newCarry byte
+
+	if useCarry {
+		result, hc, newCarry = c.ALUSub(a, b, carry)
+	} else {
+		result, hc, newCarry = c.ALUSub(a, b, 0)
+	}
+
+	c.setZFlag(result)
+	c.setNegFlag(1)
+	c.setHalfCarry(hc)
+	c.setCarry(newCarry)
+
+	return
+}
+
+func (c *CPU) and(a, b byte) (result byte) {
+	result = c.ALUAnd(a, b)
+	c.setZFlag(result)
+	c.setNegFlag(0)
+	c.setHalfCarry(1)
+	c.setCarry(0)
+
+	return
 }

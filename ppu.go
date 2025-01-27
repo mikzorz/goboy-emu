@@ -4,6 +4,7 @@ import (
 //	"image/color"
 //
 // "log"
+    utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type PPU struct {
@@ -32,9 +33,9 @@ func NewPPU() *PPU {
 
 func (p *PPU) Cycle() {
 	// if LCD/PPU are enabled
-	if isBitSet(7, p.LCDC) {
+	if utils.IsBitSet(7, p.LCDC) {
 		if p.oamDMA {
-			srcAddr := joinBytes(p.oamSource, p.oamTransferI)
+			srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
 			data := p.bus.Read(srcAddr)
 			p.oam[p.oamTransferI] = data
 			p.oamTransferI++
@@ -99,7 +100,7 @@ func (p *PPU) Cycle() {
 		}
 
 		if p.LY == p.LYC && p.dot == 0 {
-			p.STAT = setBit(2, p.STAT)
+			p.STAT = utils.SetBit(2, p.STAT)
 			// TODO may need to check STAT bits 6-3 to decide whether to interrupt
 			p.bus.InterruptRequest(LCDI_INTR)
 		}
