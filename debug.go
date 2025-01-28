@@ -22,39 +22,19 @@ var debugX int32 = max(memRowWidth, gameWindow.w) + 5
 var paused = true
 var cyclesPerFrame = 8
 var breakpoints = map[uint16]bool{
-	// 0xDEFA: true,
-	// 0xC2C0: true,
-	// 0x4BCA: true,
 }
 
 // int = how many occurrences to skip before pausing.
 // multiply by 4, because it decrements per tick, not per cycle
 var opOccurrences = map[byte]int{
 	// 0x40: 0, // LD B, B (used by mts tests, but also unintentionally matches CB 40)
-	// 0xFB: 0, // EI
-	// 0x06: 1703,
-	// 0xc3: 0,
-	// 0xc9: 0,
-	// 0x33: 0,
-	// 0x27: 255*4*5,
-	// 0xC3: 0,
 }
 
 var opsWithArgs = map[byte]byte{
-	// 0xE0: 0x05, // LDH TIMA
-	// 0xE0: 0x07, // LDH TAC
-	// 0x3E: 0x0, // LD A 0
 }
 
 // Break after X amount of t-cycles
 var cyclebreaks = map[int]bool{
-	// 1665000: true,
-	// 935000: true,
-	// 251000: true,
-	// 581230: true,
-	// 2120000: true,
-	// 65700: true,
-	// 67000: true,
 }
 var curCycle = 0
 
@@ -117,6 +97,9 @@ func handleDebugInput() {
 		cyclesPerFrame = max(cyclesPerFrame/2, 1)
 	}
 
+	if rl.IsKeyPressed(rl.KeyLeftControl) {
+    enableDebugInfo = !enableDebugInfo
+  }
 }
 
 func checkBreakpoints() bool {
@@ -154,7 +137,7 @@ func drawDebugInfo() {
 	rl.DrawTextEx(debugFont, fmt.Sprintf("X: %d", bus.lcd.x), rl.Vector2{float32(debugX + 150), float32(100 - 2*fontSize)}, float32(fontSize), 0, rl.LightGray)
 	rl.DrawTextEx(debugFont, fmt.Sprintf("tcycle: %d", curCycle), rl.Vector2{float32(debugX + 150), float32(100 - 3*fontSize)}, float32(fontSize), 0, rl.LightGray)
 
-	rl.DrawTextEx(debugFont, "<-, -> Change Speed, ^, v Scroll Ram, [Space] Pause/Unpause, [A] 1 M-Cycle, [S] 1 Op, [D] 100 Ops, [M] Toggle Mem/Screen", rl.Vector2{float32(debugX), float32(window.h - 5 - int32(fontSize))}, float32(fontSize), 0, rl.Blue)
+	rl.DrawTextEx(debugFont, "<-, -> Change Speed, ^, v Scroll Ram, [Space] Pause/Unpause, [A] 1 M-Cycle, [S] 1 Op, [D] 100 Ops, [M] Toggle Mem/Screen, [LCtrl] Toggle Debugger", rl.Vector2{float32(5), float32(window.h - 5 - int32(fontSize))}, float32(fontSize), 0, rl.Blue)
 }
 
 func drawMem(start, end int) {

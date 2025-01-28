@@ -1118,14 +1118,13 @@ func (c *CPU) SetOpFunc() {
 		// If halt comes immediately after ei, the return from the interrupt handler will be the halt command again
 		// If halt is followed by rst, rst will return to itself
 
-		// c.opFunc = func() {
-		// 	c.bus.setHalt(true)
-		// 	if c.IME == 0 && (c.IE&c.IF != 0) {
-		// 		c.bus.setHalt(false)
-		// 		c.DecodeOp()
-		// 	}
-		// }
-    panic("halted")
+		c.opFunc = func() {
+			c.bus.setHalt(true)
+			if c.IME == 0 && (c.IE&c.IF != 0) {
+				c.bus.setHalt(false)
+				c.DecodeOp()
+			}
+		}
 
 	case "CP":
 		c.setCPFunc()

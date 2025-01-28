@@ -10,22 +10,21 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// const DEV = true
+const DEV = true
 
-const DEV = false
+// const DEV = false
+
+var enableDebugInfo bool
 
 // Big TODO List
-
-// Clean up code. Break big funcs up. Make things easier to work with.
 
 // Draw OAM tiles in debug screen.
 
 // Pass more tests
 // Currently, instr_timing.gb fails during test setup
-//  The timer triggers an interrupt slightly too late.
+//  The timer may trigger an interrupt slightly too late.
 // This could be a timer issue, but it could also be another instr taking the wrong amount of m-cycles.
 //  Look at the different ops used for timer setup, check their timings.
-//  If I have to, overhaul the cpu cycle process. (See line 47)
 
 // When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
 // End of test is JR to itself, causing infinite loop
@@ -35,6 +34,7 @@ const DEV = false
 // The GB might not have a bus...
 //  It does, but it doesn't have a clock or anything. It's just wires. No control.
 //  So, bus.cycle doesn't make much sense for a Gameboy
+
 // VRAM & OAM RAM belong to PPU, CPU goes via PPU, PPU can block CPU access to VRAM
 // 20 cycles of OAM search, 43 cycles of pixel transfer(drawing), 51 cycles of H-Blank
 // Pixel FIFO
@@ -46,9 +46,6 @@ const DEV = false
 // Rearrange components to match hardware more closely
 // Block off everything except HRAM during OAM_DMA? Necessary, or just for accuracy?
 
-// If i were to make any big changes, I would replace cpu function queue with a state check
-// Track current step of op code.
-// Func queue feels messy, fragile and confusing after not seeing it for a while.
 // I would also make register read/writes less messy, with more descriptive functions.
 
 var joypadMap = map[int32]Button{
@@ -142,9 +139,11 @@ func setup() {
 		populatePrefixLookup()
 		if DEV {
 			instructions = disassemble(disAssembleStart, disAssembleEnd)
+      enableDebugInfo = true
 		} else {
 			gameWindow.x, gameWindow.y = 0, 0
 			window.w, window.h = gameWindow.w, gameWindow.h
+      enableDebugInfo = false
 		}
 	}
 }
@@ -189,9 +188,11 @@ func main() {
 				}
 			}
 
-			disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
-			disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
-			instructions = disassemble(disAssembleStart, disAssembleEnd)
+      if enableDebugInfo {
+        disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
+        disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
+        instructions = disassemble(disAssembleStart, disAssembleEnd)
+      }
 		} else {
 			for i := 0; i < 70224; i++ {
 				tick()
@@ -230,7 +231,7 @@ func getJoypadInput() {
 func draw() {
 	rl.BeginDrawing()
 	rl.ClearBackground(color.RGBA{20, 20, 20, 255})
-	if DEV {
+	if DEV && enableDebugInfo {
 		drawDebugInfo()
 	}
 	if shouldDrawGame {
