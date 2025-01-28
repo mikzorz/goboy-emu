@@ -1,10 +1,10 @@
 package main
 
 import (
-//	"image/color"
-//
-// "log"
-    utils "github.com/mikzorz/gameboy-emulator/helpers"
+	//	"image/color"
+	//
+	// "log"
+	utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type PPU struct {
@@ -14,8 +14,10 @@ type PPU struct {
 	LCDC, STAT, SCX, SCY, LY, LYC, BGP, OBP0, OBP1, WY, WX uint8 // move to LCD?
 	x                                                      int
 	oamDMA                                                 bool // oam dma transfer in progress
+	DMAStart                                               bool // true for first cycle of OAM DMA
 	oamSource                                              byte // high byte of oam source address
 	oamTransferI                                           byte // byte to fetch
+	oamByte                                                byte
 	mode                                                   int
 	dot                                                    int // current dot of scanline
 }
@@ -35,13 +37,20 @@ func (p *PPU) Cycle() {
 	// if LCD/PPU are enabled
 	if utils.IsBitSet(7, p.LCDC) {
 		if p.oamDMA {
-			srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
-			data := p.bus.Read(srcAddr)
-			p.oam[p.oamTransferI] = data
-			p.oamTransferI++
+			if p.DMAStart {
+				srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
+				p.oamByte = p.bus.Read(srcAddr)
+				p.DMAStart = false
+			} else {
+				p.oam[p.oamTransferI] = p.oamByte
+				p.oamTransferI++
+				srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
 
-			if p.oamTransferI >= 160 {
-				p.oamDMA = false
+				if p.oamTransferI >= 160 {
+					p.oamDMA = false
+				} else {
+					p.oamByte = p.bus.Read(srcAddr)
+				}
 			}
 		}
 
@@ -150,6 +159,7 @@ func (p *PPU) Write(addr uint16, data byte) {
 
 func (p *PPU) StartOAMTransfer(source byte) {
 	p.oamDMA = true
+	p.DMAStart = true
 	p.oamSource = source
 	p.oamTransferI = 0
 }

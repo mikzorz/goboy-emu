@@ -3,7 +3,7 @@ package main
 // import "log"
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
-    utils "github.com/mikzorz/gameboy-emulator/helpers"
+	utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type LCD struct {

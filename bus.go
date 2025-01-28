@@ -1,16 +1,16 @@
 package main
 
 import (
-  "log"
+	"log"
 
-  utils "github.com/mikzorz/gameboy-emulator/helpers"
+	utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type BusI interface {
-  Read(uint16) byte
-  Write(uint16, byte)
-  isHalted() bool
-  setHalt(bool)
+	Read(uint16) byte
+	Write(uint16, byte)
+	isHalted() bool
+	setHalt(bool)
 }
 
 type Bus struct {
@@ -54,12 +54,17 @@ func NewBus(cart *Cart) *Bus {
 }
 
 func (b *Bus) Cycle() {
-	b.clock.Tick() // Should clock tick before or after cpu cycle?
 	// TODO don't tick if STOPped
-	if b.clock.sysClock%4 == 0 {
+	if b.clock.DIV%4 == 0 {
+		b.clock.UpdateTIMAState()
+  }
+		b.clock.IncrementTIMA()
+
+	if b.clock.DIV%4 == 0 {
 		b.cpu.Cycle()
 	}
 	b.ppu.Cycle()
+	b.clock.Tick()
 }
 
 func (b Bus) Read(addr uint16) byte {
@@ -117,7 +122,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 	case 0xFF06:
 		return b.clock.TMA
 	case 0xFF07:
-		return b.clock.TAC
+		return b.clock.TAC & 0x7
 	case 0xFF0F:
 		return b.cpu.IF
 	//  // case 0xFF1C:
@@ -216,14 +221,34 @@ func (b *Bus) Write(addr uint16, data byte) {
 			b.clock.DIV = 0x0000
 			b.clock.sysClock = 0
 		case 0xFF05:
-			if !b.clock.timaOverflow {
-				b.clock.TIMA = data
-			}
+      if b.clock.TIMAState == TIMA_DELAYING {
+        b.clock.TIMAState = TIMA_NO_OVERFLOW
+      } else if b.clock.TIMAState == TIMA_RELOADED {
+        // Ignore write to TIMA
+        break
+      }
+
+			b.clock.TIMA = data
 		case 0xFF06:
 			b.clock.TMA = data
+      if b.clock.TIMAState == TIMA_RELOADED {
+        b.clock.TIMA = data
+      }
+      if b.clock.TIMAState == TIMA_DELAYING {
+        
+      }
+			// if b.clock.timaOverflow && b.clock.ticksUntilTIMAOverflow == 0 {
+			// if b.clock.timaOverflow {
+			// b.clock.TIMA = data
+			// }
 		case 0xFF07:
-			b.clock.TAC = data
+			b.clock.TAC = data & 0x7
 		case 0xFF0F:
+			// if b.clock.timaOverflow && b.clock.ticksUntilTIMAOverflow == 0 {
+			//   if utils.GetBit(int(TIMER_INTR), data) == 0 {
+			//     b.clock.cancelTimerIntr = true
+			//   }
+			// }
 			b.cpu.IF = data
 		case 0xFF10, 0xFF11, 0xFF12, 0xFF13, 0xFF14:
 			// Channel 1 audio
@@ -297,11 +322,11 @@ func (b *Bus) Write(addr uint16, data byte) {
 }
 
 func (b *Bus) isHalted() bool {
-  return b.halted
+	return b.halted
 }
 
 func (b *Bus) setHalt(v bool) {
-  b.halted = v
+	b.halted = v
 }
 
 type interrupt int

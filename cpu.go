@@ -3,7 +3,7 @@ package main
 import (
 	// "fmt"
 	"github.com/mikzorz/gameboy-emulator/alu"
-  utils "github.com/mikzorz/gameboy-emulator/helpers"
+	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"log"
 )
 
@@ -60,8 +60,8 @@ type CPU struct {
 	inst        Instruction // current instruction
 	opFunc      func()
 	flagMatched bool
-  setIME bool // IME setting is delayed 1 cycle
-  nextIME byte // 1 or 0
+	setIME      bool // IME setting is delayed 1 cycle
+	untilIME    int
 }
 
 func NewCPU() *CPU {
@@ -79,7 +79,7 @@ func NewCPU() *CPU {
 		},
 		ControlUnit:        ControlUnit{},
 		interruptAddresses: []uint8{0x40, 0x48, 0x50, 0x58, 0x60}, // V-Blank, LCDC, Timer, Serial, Joypad
-		inst:               lookup(0x00, false), // NOP
+		inst:               lookup(0x00, false),                   // NOP
 	}
 	c.opFunc = c.NOP
 	return c
@@ -89,18 +89,23 @@ func (c *CPU) Cycle() {
 
 	if !c.bus.isHalted() {
 
-    if c.setIME {
-      c.IME = c.nextIME
-      c.setIME = false
-    }
 		// Execute next cycle of op
-		c.opFunc()
 		c.curCycle++
+		if c.setIME {
+			// if c.untilIME > 0 {
+			//   c.untilIME--
+			// } else {
+			c.IME = 1
+			c.setIME = false
+			// }
+		}
+
+		c.opFunc()
 
 		// }
 	} else {
 		// log.Fatalf("halted, TODO: handle this")
-    c.CheckInterrupts()
+		c.CheckInterrupts()
 	}
 
 }
@@ -109,60 +114,60 @@ func (c *CPU) DecodePrefix() {
 	// if intr := c.FetchIR(true); intr {
 	// 	return
 	// }
-  // Should interrupts be checked after prefix?
-  // Wouldn't that cause incorrect functions to run after a RET?
+	// Should interrupts be checked after prefix?
+	// Wouldn't that cause incorrect functions to run after a RET?
 	c.FetchIR(true)
 
-  c.opFunc = func() {
-    if c.curCycle == 0 {
-      c.Read()
-      return
-    }
+	c.opFunc = func() {
+		if c.curCycle == 0 {
+			c.Read()
+			return
+		}
 
-    if c.curCycle == 1 || c.inst.To != mHL {
-      switch c.inst.Op {
-      case "SWAP":
-        c.Swap()
-      case "BIT":
-        c.Bit()
-        c.DecodeOp()
-        return
-      case "RES":
-        c.Res()
-      case "SET":
-        c.Set()
-      case "SRA":
-        c.SRA()
-      case "SLA":
-        c.SLA()
-      case "SRL":
-        c.SRL()
-      case "RR":
-        c.RR()
-      case "RRC":
-        c.RRC()
-      case "RL":
-        c.RL()
-      case "RLC":
-        c.RLC()
-      default:
-        log.Panicf("unimplemented PREFIXED op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", c.inst.Op, c.IR, c.inst.DataType, c.inst.To, c.inst.From, c.inst.Flag)
-      }
+		if c.curCycle == 1 || c.inst.To != mHL {
+			switch c.inst.Op {
+			case "SWAP":
+				c.Swap()
+			case "BIT":
+				c.Bit()
+				c.DecodeOp()
+				return
+			case "RES":
+				c.Res()
+			case "SET":
+				c.Set()
+			case "SRA":
+				c.SRA()
+			case "SLA":
+				c.SLA()
+			case "SRL":
+				c.SRL()
+			case "RR":
+				c.RR()
+			case "RRC":
+				c.RRC()
+			case "RL":
+				c.RL()
+			case "RLC":
+				c.RLC()
+			default:
+				log.Panicf("unimplemented PREFIXED op: %s/0x%02X, dt: %v, to: %s, from: %s, flag: %s", c.inst.Op, c.IR, c.inst.DataType, c.inst.To, c.inst.From, c.inst.Flag)
+			}
 
-      if c.inst.To != mHL {
-        c.SetRegister()
-        c.DecodeOp()
-      } else {
-        c.Write()
+			if c.inst.To != mHL {
+				c.SetRegister()
+				c.DecodeOp()
+			} else {
+				c.Write()
 
-      }
-      return
-    }
+			}
+			return
+		}
 
-    if c.curCycle == 2 {
-      c.DecodeOp()
-    }
-  }
+		if c.curCycle == 2 {
+			c.DecodeOp()
+		}
+	}
 }
 
 func (c *CPU) CheckInterrupts() (interrupted bool) {
@@ -183,9 +188,11 @@ func (c *CPU) CheckInterrupts() (interrupted bool) {
 					c.inst.Op = "INT"
 					// c.inst.Abs = c.interruptAddr
 					c.WZ = utils.JoinBytes(0x00, c.interruptAddr)
+					c.curCycle = 0xFF
 
 					// interrupt transition
 					c.opFunc = c.MoveToInterrupt
+					// c.MoveToInterrupt()
 					return true
 				}
 			}
@@ -209,7 +216,7 @@ func (c *CPU) MoveToInterrupt() {
 		c.pushPCToStack(LO)
 	case 4:
 		c.SetPC()
-    c.DecodeOp()
+		c.DecodeOp()
 	}
 }
 
@@ -266,7 +273,7 @@ func (c *CPU) setJPFunc() {
 		// } else {
 		// 	c.opFunc = c.JPDirectWithConditional
 		// }
-    c.opFunc = c.JPDirect
+		c.opFunc = c.JPDirect
 	case NODATA:
 		c.opFunc = c.JPhl
 	default:
@@ -455,22 +462,22 @@ func (c *CPU) setLDFunc() {
 		return
 	} else if c.IR&0xC7 == 0x06 {
 		// 00xxx110
-    if c.IR == 0x36 {
-      // LD (HL) n
-      c.opFunc = func() {
-        switch c.curCycle {
-        case 0:
-          c.Fetch(LO)
-        case 1:
-          c.writeIndirect(mHL, c.readR8(Z))
-        case 2:
-          c.DecodeOp()
-        }
-      }
-    } else {
-      // LD r n
-      c.opFunc = c.LDn
-    }
+		if c.IR == 0x36 {
+			// LD (HL) n
+			c.opFunc = func() {
+				switch c.curCycle {
+				case 0:
+					c.Fetch(LO)
+				case 1:
+					c.writeIndirect(mHL, c.readR8(Z))
+				case 2:
+					c.DecodeOp()
+				}
+			}
+		} else {
+			// LD r n
+			c.opFunc = c.LDn
+		}
 		return
 	} else if c.IR&0xCF == 0x1 {
 		// 00xx0001
@@ -591,12 +598,12 @@ func (c *CPU) setLDFunc() {
 	case 0xEA:
 		// LD (nn) A
 		c.opFunc = c.LDDirectA
-  case 0xF2:
+	case 0xF2:
 		// LD a (C)
 		c.opFunc = func() {
 			switch c.curCycle {
 			case 0:
-    		c.writeR8(Z, c.readIndirect(mC))
+				c.writeR8(Z, c.readIndirect(mC))
 			case 1:
 				c.A = utils.LSB(c.WZ)
 				c.DecodeOp()
@@ -611,7 +618,7 @@ func (c *CPU) setLDFunc() {
 			case 1:
 				res, hc, carry := c.AddSignedToUnsigned(utils.LSB(c.SP), utils.LSB(c.WZ))
 				c.writeR8(L, res)
-        c.clearFlags()
+				c.clearFlags()
 				c.setHalfCarry(hc)
 				c.setCarry(carry)
 
@@ -737,7 +744,7 @@ func (c *CPU) LDHFromMem() {
 		val := c.readMem(utils.JoinBytes(0xFF, c.readR8(Z)))
 		c.writeR8(Z, val)
 	case 2:
-    c.A = utils.LSB(c.WZ)
+		c.A = utils.LSB(c.WZ)
 		c.DecodeOp()
 	}
 }
@@ -746,7 +753,7 @@ func (c *CPU) INC() {
 	if c.inst.To == mHL {
 		switch c.curCycle {
 		case 0:
-		c.writeR8(Z, c.readIndirect(mHL))
+			c.writeR8(Z, c.readIndirect(mHL))
 		case 1:
 			c.incrementReg(Z)
 			c.writeIndirect(mHL, c.readR8(Z))
@@ -770,7 +777,7 @@ func (c *CPU) DEC() {
 	if c.inst.To == mHL {
 		switch c.curCycle {
 		case 0:
-		c.writeR8(Z, c.readIndirect(mHL))
+			c.writeR8(Z, c.readIndirect(mHL))
 		case 1:
 			c.decrementReg(Z)
 			c.writeIndirect(mHL, c.readR8(Z))
@@ -818,19 +825,19 @@ func (c *CPU) AddHLrr() {
 	switch c.curCycle {
 	case 0:
 		// add lo
-    // Z Flag must be preserved for tests to pass
-    zFlag := c.getZFlag()
+		// Z Flag must be preserved for tests to pass
+		zFlag := c.getZFlag()
 		rr := c.readR16(c.inst.From)
 		l := c.add(utils.LSB(c.HL), utils.LSB(rr), false)
 		c.writeR8(L, l)
-    c.setZFlag(zFlag)
+		c.setZFlag(zFlag)
 	case 1:
 		// add hi
-    zFlag := c.getZFlag()
+		zFlag := c.getZFlag()
 		rr := c.readR16(c.inst.From)
 		h := c.add(utils.MSB(c.HL), utils.MSB(rr), true)
 		c.writeR8(H, h)
-    c.setZFlag(zFlag)
+		c.setZFlag(zFlag)
 		c.DecodeOp()
 	}
 
@@ -876,7 +883,7 @@ func (c *CPU) AddSPe8() {
 	case 1:
 		res, hc, carry := c.AddSignedToUnsigned(utils.LSB(c.SP), utils.LSB(c.WZ))
 		c.writeR8(Z, res)
-    c.clearFlags()
+		c.clearFlags()
 		c.setHalfCarry(hc)
 		c.setCarry(carry)
 
@@ -1080,7 +1087,6 @@ func (c *CPU) FetchIR(prefix bool) (interrupted bool) {
 
 	c.inst = lookup(c.IR, prefix)
 
-
 	return false
 }
 
@@ -1089,12 +1095,12 @@ func (c *CPU) DecodeOp() {
 		return
 	}
 
-  c.SetOpFunc()
+	c.SetOpFunc()
 
 }
 
 func (c *CPU) SetOpFunc() {
-  	switch c.inst.Op {
+	switch c.inst.Op {
 	case "STOP":
 		// c.bus.halted = true
 		// c.bus.DIV = 0
@@ -1111,11 +1117,16 @@ func (c *CPU) SetOpFunc() {
 		// causing the following instruction to be read twice.
 		// If halt comes immediately after ei, the return from the interrupt handler will be the halt command again
 		// If halt is followed by rst, rst will return to itself
-    c.opFunc = func(){
-  		c.bus.setHalt(true)
-      c.DecodeOp()
-    }
-    
+
+		// c.opFunc = func() {
+		// 	c.bus.setHalt(true)
+		// 	if c.IME == 0 && (c.IE&c.IF != 0) {
+		// 		c.bus.setHalt(false)
+		// 		c.DecodeOp()
+		// 	}
+		// }
+    panic("halted")
+
 	case "CP":
 		c.setCPFunc()
 	case "JP":
@@ -1262,16 +1273,16 @@ func (c *CPU) AddRelPC() {
 
 // Set IME to 1
 func (c *CPU) SetIME() {
-	c.nextIME = 1
-  c.setIME = true
+	c.untilIME = 2
+	c.setIME = true
 	c.DecodeOp()
+	// c.IME = 1
 }
 
 // Set IME to 0
 func (c *CPU) UnsetIME() {
-	// c.nextIME = 0
-  // c.setIME = true
-  c.IME = 0
+	c.IME = 0
+	c.setIME = false
 	c.DecodeOp()
 }
 
@@ -1409,10 +1420,10 @@ func (c *CPU) POP() {
 // In BCD, 0x16 + 0x15 = 0x31
 // DAA makes this adjustment.
 func (c *CPU) DAA() {
-  result, carry := c.DecAdj(c.A, c.F)
+	result, carry := c.DecAdj(c.A, c.F)
 
 	c.setHalfCarry(0)
-  c.setCarry(carry)
+	c.setCarry(carry)
 
 	c.setZFlag(result)
 	c.A = result
@@ -1433,7 +1444,7 @@ func (c *CPU) CCF() {
 // Swap hi and lo nibbles of byte
 func (c *CPU) Swap() {
 	r := c.readR8(Z)
-  swapped := c.ALUSwap(r)
+	swapped := c.ALUSwap(r)
 	c.writeR8(Z, swapped)
 	c.clearFlags()
 	c.setZFlag(swapped)
@@ -1841,7 +1852,7 @@ func (c *CPU) setZFlag(value byte) {
 }
 
 func (c *CPU) getZFlag() byte {
-  return utils.GetBit(7, c.F)
+	return utils.GetBit(7, c.F)
 }
 
 func (c *CPU) setNegFlag(to byte) {

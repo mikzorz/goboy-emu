@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	rl "github.com/gen2brain/raylib-go/raylib"
+	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"log"
 	"strings"
-  utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 // TODO, remove hardcoded font or provide one with project.
@@ -24,7 +24,7 @@ var cyclesPerFrame = 8
 var breakpoints = map[uint16]bool{
 	// 0xDEFA: true,
 	// 0xC2C0: true,
-  // 0x4BCA: true,
+	// 0x4BCA: true,
 }
 
 // int = how many occurrences to skip before pausing.
@@ -36,14 +36,14 @@ var opOccurrences = map[byte]int{
 	// 0xc3: 0,
 	// 0xc9: 0,
 	// 0x33: 0,
-  // 0x27: 255*4*5,
-  // 0xC3: 0,
+	// 0x27: 255*4*5,
+	// 0xC3: 0,
 }
 
 var opsWithArgs = map[byte]byte{
 	// 0xE0: 0x05, // LDH TIMA
 	// 0xE0: 0x07, // LDH TAC
-  // 0x3E: 0x0, // LD A 0
+	// 0x3E: 0x0, // LD A 0
 }
 
 // Break after X amount of t-cycles
@@ -51,8 +51,10 @@ var cyclebreaks = map[int]bool{
 	// 1665000: true,
 	// 935000: true,
 	// 251000: true,
-  // 581230: true,
-  // 2120000: true,
+	// 581230: true,
+	// 2120000: true,
+	// 65700: true,
+	// 67000: true,
 }
 var curCycle = 0
 
@@ -251,6 +253,7 @@ func drawIO() {
 	drawRegister(c.DIV, "DIV", 2, 2)
 	drawRegister(c.TIMA, "TIMA", 3, 2)
 	drawRegister(c.TMA, "TMA", 4, 2)
+	drawRegister(c.TAC, "TAC", 5, 2)
 }
 
 func drawRegister(r interface{}, name string, col, row int) {
