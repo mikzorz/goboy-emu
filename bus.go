@@ -55,12 +55,13 @@ func NewBus(cart *Cart) *Bus {
 
 func (b *Bus) Cycle() {
 	// TODO don't tick if STOPped
-	if b.clock.DIV%4 == 0 {
+	if b.clock.sysClock%4 == 0 {
 		b.clock.UpdateTIMAState()
   }
-		b.clock.IncrementTIMA()
 
-	if b.clock.DIV%4 == 0 {
+	b.clock.IncrementTIMA()
+
+	if b.clock.sysClock%4 == 0 {
 		b.cpu.Cycle()
 	}
 	b.ppu.Cycle()
@@ -234,21 +235,9 @@ func (b *Bus) Write(addr uint16, data byte) {
       if b.clock.TIMAState == TIMA_RELOADED {
         b.clock.TIMA = data
       }
-      if b.clock.TIMAState == TIMA_DELAYING {
-        
-      }
-			// if b.clock.timaOverflow && b.clock.ticksUntilTIMAOverflow == 0 {
-			// if b.clock.timaOverflow {
-			// b.clock.TIMA = data
-			// }
 		case 0xFF07:
 			b.clock.TAC = data & 0x7
 		case 0xFF0F:
-			// if b.clock.timaOverflow && b.clock.ticksUntilTIMAOverflow == 0 {
-			//   if utils.GetBit(int(TIMER_INTR), data) == 0 {
-			//     b.clock.cancelTimerIntr = true
-			//   }
-			// }
 			b.cpu.IF = data
 		case 0xFF10, 0xFF11, 0xFF12, 0xFF13, 0xFF14:
 			// Channel 1 audio
