@@ -5,15 +5,15 @@ import (
 )
 
 type Clock struct {
-	bus          *Bus
-	speed        uint   // 4194304 Hz / 2^22 Hz
-	DIV          uint16 // increments at 1048576 Hz / 16
-	TIMA         byte
-	TMA          byte // Timer Modulo
-	TAC          byte
-	prevAND      byte
+	bus     *Bus
+	speed   uint   // 4194304 Hz / 2^22 Hz
+	DIV     uint16 // increments at 1048576 Hz / 16
+	TIMA    byte
+	TMA     byte // Timer Modulo
+	TAC     byte
+	prevAND byte
 
-	sysClock               uint
+	sysClock uint
 
 	TIMAState timaState
 }
@@ -23,7 +23,7 @@ type timaState int
 const (
 	TIMA_NO_OVERFLOW timaState = iota
 	TIMA_DELAYING
-  TIMA_RELOADED
+	TIMA_RELOADED
 )
 
 func NewClock() *Clock {
@@ -47,10 +47,10 @@ func (c *Clock) Tick() {
 }
 
 func (c *Clock) UpdateTIMAState() {
-  switch c.TIMAState {
-  case TIMA_RELOADED:
+	switch c.TIMAState {
+	case TIMA_RELOADED:
 		c.TIMAState = TIMA_NO_OVERFLOW
-  case TIMA_DELAYING:
+	case TIMA_DELAYING:
 		c.TIMA = c.TMA
 		c.bus.InterruptRequest(TIMER_INTR)
 		c.TIMAState = TIMA_RELOADED

@@ -57,7 +57,7 @@ func (b *Bus) Cycle() {
 	// TODO don't tick if STOPped
 	if b.clock.sysClock%4 == 0 {
 		b.clock.UpdateTIMAState()
-  }
+	}
 
 	b.clock.IncrementTIMA()
 
@@ -222,19 +222,19 @@ func (b *Bus) Write(addr uint16, data byte) {
 			b.clock.DIV = 0x0000
 			b.clock.sysClock = 0
 		case 0xFF05:
-      if b.clock.TIMAState == TIMA_DELAYING {
-        b.clock.TIMAState = TIMA_NO_OVERFLOW
-      } else if b.clock.TIMAState == TIMA_RELOADED {
-        // Ignore write to TIMA
-        break
-      }
+			if b.clock.TIMAState == TIMA_DELAYING {
+				b.clock.TIMAState = TIMA_NO_OVERFLOW
+			} else if b.clock.TIMAState == TIMA_RELOADED {
+				// Ignore write to TIMA
+				break
+			}
 
 			b.clock.TIMA = data
 		case 0xFF06:
 			b.clock.TMA = data
-      if b.clock.TIMAState == TIMA_RELOADED {
-        b.clock.TIMA = data
-      }
+			if b.clock.TIMAState == TIMA_RELOADED {
+				b.clock.TIMA = data
+			}
 		case 0xFF07:
 			b.clock.TAC = data & 0x7
 		case 0xFF0F:
@@ -294,9 +294,9 @@ func (b *Bus) Write(addr uint16, data byte) {
 			b.ppu.WX = data
 		case 0xFFFF:
 			b.cpu.IE = data
-    // case 0xff03:
-    // ff0x may refer to lower byte of DIV
-    //   b.clock.DIV = 0
+			// case 0xff03:
+			// ff0x may refer to lower byte of DIV
+			//   b.clock.DIV = 0
 		// case 0xFF03, 0xFF08, 0xFF09, 0xFF0A, 0xFF0B, 0xFF0C, 0xFF0D, 0xFF0E, 0xFF15, 0xFF1F, 0xFF4C:
 		case 0xFF08, 0xFF09, 0xFF0A, 0xFF0B, 0xFF0C, 0xFF0D, 0xFF0E, 0xFF15, 0xFF1F, 0xFF4C:
 			// undocumented

@@ -139,11 +139,11 @@ func setup() {
 		populatePrefixLookup()
 		if DEV {
 			instructions = disassemble(disAssembleStart, disAssembleEnd)
-      enableDebugInfo = true
+			enableDebugInfo = true
 		} else {
 			gameWindow.x, gameWindow.y = 0, 0
 			window.w, window.h = gameWindow.w, gameWindow.h
-      enableDebugInfo = false
+			enableDebugInfo = false
 		}
 	}
 }
@@ -188,11 +188,11 @@ func main() {
 				}
 			}
 
-      if enableDebugInfo {
-        disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
-        disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
-        instructions = disassemble(disAssembleStart, disAssembleEnd)
-      }
+			if enableDebugInfo {
+				disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
+				disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
+				instructions = disassemble(disAssembleStart, disAssembleEnd)
+			}
 		} else {
 			for i := 0; i < 70224; i++ {
 				tick()

@@ -21,8 +21,7 @@ var debugX int32 = max(memRowWidth, gameWindow.w) + 5
 // Debug control
 var paused = true
 var cyclesPerFrame = 8
-var breakpoints = map[uint16]bool{
-}
+var breakpoints = map[uint16]bool{}
 
 // int = how many occurrences to skip before pausing.
 // multiply by 4, because it decrements per tick, not per cycle
@@ -30,12 +29,10 @@ var opOccurrences = map[byte]int{
 	// 0x40: 0, // LD B, B (used by mts tests, but also unintentionally matches CB 40)
 }
 
-var opsWithArgs = map[byte]byte{
-}
+var opsWithArgs = map[byte]byte{}
 
 // Break after X amount of t-cycles
-var cyclebreaks = map[int]bool{
-}
+var cyclebreaks = map[int]bool{}
 var curCycle = 0
 
 var disAssembleStart, disAssembleEnd uint16 = 0x0000, 0xFFFF
@@ -98,8 +95,8 @@ func handleDebugInput() {
 	}
 
 	if rl.IsKeyPressed(rl.KeyLeftControl) {
-    enableDebugInfo = !enableDebugInfo
-  }
+		enableDebugInfo = !enableDebugInfo
+	}
 }
 
 func checkBreakpoints() bool {
