@@ -17,6 +17,7 @@ type Bus struct {
 	cart   *Cart
 	cpu    *CPU
 	ppu    *PPU
+  dma *DMA
 	clock  *Clock
 	lcd    *LCD
 	joypad *Joypad
@@ -39,6 +40,7 @@ func NewBus(cart *Cart) *Bus {
 		cart:   cart,
 		cpu:    NewCPU(),
 		ppu:    NewPPU(),
+    dma: NewDMA(),
 		clock:  NewClock(),
 		lcd:    NewLCD(),
 		joypad: NewJoypad(),
@@ -48,6 +50,7 @@ func NewBus(cart *Cart) *Bus {
 	cart.bus = b
 	b.cpu.bus = b
 	b.ppu.bus = b
+  b.dma.bus = b
 	b.clock.bus = b
 	b.lcd.bus = b
 	return b
@@ -63,6 +66,7 @@ func (b *Bus) Cycle() {
 
 	if b.clock.sysClock%4 == 0 {
 		b.cpu.Cycle()
+    b.dma.Cycle()
 	}
 	b.ppu.Cycle()
 	b.clock.Tick()
@@ -99,7 +103,7 @@ func (b Bus) Read(addr uint16) byte {
 		// FF80-FFFE, hram
 		return b.hram[addr-0xFF80]
 	case addr <= 0xFFFF:
-		// FFFF-FFFF, Interrupt Enable Register (IE)
+		// FFFF, Interrupt Enable Register (IE)
 		return b.cpu.IE
 	default:
 		log.Panicf("unimplemented mem access 0x%04X", addr)
@@ -281,7 +285,7 @@ func (b *Bus) Write(addr uint16, data byte) {
 		case 0xFF45:
 			b.ppu.LYC = data
 		case 0xFF46:
-			b.ppu.StartOAMTransfer(data)
+			b.dma.StartOAMTransfer(data)
 		case 0xFF47:
 			b.ppu.BGP = data
 		case 0xFF48:

@@ -1,23 +1,14 @@
 package main
 
 import (
-	//	"image/color"
-	//
-	// "log"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
 )
 
 type PPU struct {
 	bus                                                    *Bus
 	vram                                                   [0x2000]byte
-	oam                                                    [0xA0]byte
 	LCDC, STAT, SCX, SCY, LY, LYC, BGP, OBP0, OBP1, WY, WX uint8 // move to LCD?
 	x                                                      int
-	oamDMA                                                 bool // oam dma transfer in progress
-	DMAStart                                               bool // true for first cycle of OAM DMA
-	oamSource                                              byte // high byte of oam source address
-	oamTransferI                                           byte // byte to fetch
-	oamByte                                                byte
 	mode                                                   ppuMode
 	dot                                                    int // current dot of scanline
 }
@@ -34,7 +25,6 @@ const (
 func NewPPU() *PPU {
 	return &PPU{
 		vram: [0x2000]byte{},
-		oam:  [0xA0]byte{},
 		LCDC: 0x91,
 		BGP:  0xFC,
 		OBP0: 0xFF,
@@ -45,23 +35,6 @@ func NewPPU() *PPU {
 func (p *PPU) Cycle() {
 	// if LCD/PPU are enabled
 	if utils.IsBitSet(7, p.LCDC) {
-		if p.oamDMA {
-			if p.DMAStart {
-				srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
-				p.oamByte = p.bus.Read(srcAddr)
-				p.DMAStart = false
-			} else {
-				p.oam[p.oamTransferI] = p.oamByte
-				p.oamTransferI++
-				srcAddr := utils.JoinBytes(p.oamSource, p.oamTransferI)
-
-				if p.oamTransferI >= 160 {
-					p.oamDMA = false
-				} else {
-					p.oamByte = p.bus.Read(srcAddr)
-				}
-			}
-		}
 
 		if p.LY >= 144 {
 			p.mode = MODE_VBLANK
@@ -138,11 +111,11 @@ func (p *PPU) Read(addr uint16) byte {
 	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != MODE_DRAWING {
 		return p.vram[addr-0x8000]
 	} else if addr >= 0xFE00 && addr <= 0xFE9F && (p.mode == MODE_HBLANK || p.mode == MODE_VBLANK) {
-		return p.oam[addr-0xFE00]
+		return p.bus.dma.oam[addr-0xFE00]
 	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == MODE_OAMSCAN {
 		// OAM Corruption Bug
 		// If PPU is in mode 2, r/w to FE00-FEFF cause rubbish data (except for FE00 and FE04)
-		return 0x00
+		return 0x00 // DMG
 	}
 	return 0xFF
 }
@@ -155,7 +128,7 @@ func (p *PPU) Write(addr uint16, data byte) {
 			// log.Printf("%04X %02X", addr, data)
 		}
 	} else if addr >= 0xFE00 && addr <= 0xFE9F && (p.mode == MODE_HBLANK || p.mode == MODE_VBLANK) {
-		p.oam[addr-0xFE00] = data
+		p.bus.dma.oam[addr-0xFE00] = data
 	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == MODE_OAMSCAN {
 		// OAM Corruption Bug
 		// If PPU is in mode 2, r/w to FE00-FEFF cause rubbish data (except for FE00 and FE04)
@@ -164,11 +137,4 @@ func (p *PPU) Write(addr uint16, data byte) {
 		// log.Fatalf("%04X %02X mode=%d", addr, data, p.mode)
 		// paused=true
 	}
-}
-
-func (p *PPU) StartOAMTransfer(source byte) {
-	p.oamDMA = true
-	p.DMAStart = true
-	p.oamSource = source
-	p.oamTransferI = 0
 }

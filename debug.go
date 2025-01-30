@@ -129,7 +129,9 @@ func drawDebugInfo() {
 	drawIO()
 	tilePixels = getTileData()
 	drawTiles()
+  drawOAM()
 
+  // Extra info (may or may not be actual registers)
 	rl.DrawTextEx(debugFont, fmt.Sprintf("Dot: %d", bus.ppu.dot), rl.Vector2{float32(debugX + 150), float32(100 - fontSize)}, float32(fontSize), 0, rl.LightGray)
 	rl.DrawTextEx(debugFont, fmt.Sprintf("X: %d", bus.lcd.x), rl.Vector2{float32(debugX + 150), float32(100 - 2*fontSize)}, float32(fontSize), 0, rl.LightGray)
 	rl.DrawTextEx(debugFont, fmt.Sprintf("tcycle: %d", curCycle), rl.Vector2{float32(debugX + 150), float32(100 - 3*fontSize)}, float32(fontSize), 0, rl.LightGray)
@@ -253,10 +255,25 @@ func drawRegister(r interface{}, name string, col, row int) {
 func getTileData() []byte {
 	// var tileAddrStart uint16 = 0x8000
 	var tileCount = 384                     // DMG
-	var pixels = make([]byte, tileCount*64) // tiles * 8x8 pixels
+	var pixels = []byte{} // tiles * 8x8 pixels
 
-	for tRow := 0; tRow < tileCount*8; tRow++ {
-		rAddr := uint16(tRow * 2)
+  for t := 0; t < tileCount; t++ {
+    tilePixels := getTileDataByID(t)
+    pixels = append(pixels, tilePixels...)
+  }
+
+	return pixels
+}
+
+// Return []byte containing 64 colour IDs, row by row.
+func getTileDataByID(tileID int) []byte {
+  pixels := make([]byte, 64)
+  // For each row of 8 pixels
+  //  Get the low and high bytes
+  //  Pair nth bits of each byte to get colour ID
+  //  Save colour ID to a []byte
+	for tRow := 0; tRow < 8; tRow++ {
+		rAddr := uint16((tileID * 8 + tRow) * 2)
 		loByte := bus.ppu.vram[rAddr]
 		hiByte := bus.ppu.vram[rAddr+1]
 		for b := 7; b >= 0; b-- {
@@ -267,7 +284,7 @@ func getTileData() []byte {
 		}
 	}
 
-	return pixels
+  return pixels
 }
 
 // Draw tile data image in debug area.
@@ -283,22 +300,65 @@ func drawTiles() {
 			tyOffset := ty * tilesPerRow * pixPerTile
 			for tx := 0; tx < 16; tx++ {
 				txOffset := tx * pixPerTile
-				tileAddr := blockStart + tyOffset + txOffset
-				drawTile(tileAddr, debugX+int32(block*(pixPerRow+1)+tx*8), window.h-64-5-int32(fontSize)+int32(ty*8))
+				tileIdx := blockStart + tyOffset + txOffset
+				drawTile(tilePixels, tileIdx, debugX+int32(block*(pixPerRow+1)+tx*8), window.h-64-5-int32(fontSize)+int32(ty*8), 0xFF47)
 			}
 		}
 	}
 }
 
-func drawTile(addr int, x, y int32) {
+func drawTile(pixels []byte, idx int, x, y int32, palAddr uint16) {
 	for row := 0; row < 8; row++ {
 		for column := 0; column < 8; column++ {
-			colourId := tilePixels[addr+row*8+column]
-			c := colours[(bus.Read(0xFF47)>>(colourId*2))&0x3]
+			colourId := pixels[idx+row*8+column]
+			c := colours[(bus.Read(palAddr)>>(colourId*2))&0x3]
 
 			rl.DrawPixel(x+int32(column), y+int32(row), c)
 		}
 	}
+}
+
+// Find all current OAM data from IDs in OAM and return as []byte.
+func getOAMTileIDs() []byte {
+  var objectCount = 40
+  // var oamAddr = 0xFE00
+  
+  // Every 4th tile, starting from FE02, is a tile index
+  tileIndices := []byte{}
+  for o := 0; o < objectCount; o++ {
+    tileIndices = append(tileIndices, bus.dma.oam[o * 4 + 2])
+  }
+
+  return tileIndices
+}
+
+func getOAMPixels() []byte {
+  pixels := []byte{}
+  ids := getOAMTileIDs()
+  for _, id := range ids {
+    tilePixels := getTileDataByID(int(id)) // TODO, account for bit.4 of byte 3 of oam data, DMG palette
+    pixels = append(pixels, tilePixels...)
+  }
+  return pixels
+}
+
+func drawOAM() {
+  tilesPerRow := 5
+  tilesPerColumn := 8
+  // pixPerRow := tilesPerRow * 8
+  pixPerTile := 64
+
+  pixels := getOAMPixels()
+
+  for ty := 0; ty < tilesPerColumn; ty++ {
+    tyOffset := ty * tilesPerRow * pixPerTile
+    for tx := 0; tx < tilesPerRow; tx++ {
+      txOffset := tx * pixPerTile
+      idx := tyOffset + txOffset
+      // 3*(16*8+1) puts OAM tiles after tile maps
+			drawTile(pixels, idx, debugX+int32(3*(16*8+1)+tx*8), window.h-64-5-int32(fontSize)+int32(ty*8), 0xFF47)
+    }
+  }
 }
 
 // Convert bytes to instruction strings, add them to map, ready for printing

@@ -164,10 +164,10 @@ func main() {
 	rl.SetTargetFPS(60)
 
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Crashed at address 0x%04X\n", bus.cpu.PC)
-			log.Printf("OP: 0x%02X %s, opcycle: %d\n", bus.cpu.IR, bus.cpu.inst.Op, bus.cpu.curCycle)
-		}
+		// if r := recover(); r != nil {
+		// 	log.Printf("Crashed at address 0x%04X\n", bus.cpu.PC)
+		// 	log.Printf("OP: 0x%02X %s, opcycle: %d\n", bus.cpu.IR, bus.cpu.inst.Op, bus.cpu.curCycle)
+		// }
 	}()
 
 	for !rl.WindowShouldClose() {
