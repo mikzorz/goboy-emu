@@ -80,6 +80,7 @@ func NewCPU() *CPU {
 		ControlUnit:        ControlUnit{},
 		interruptAddresses: []uint8{0x40, 0x48, 0x50, 0x58, 0x60}, // V-Blank, LCDC, Timer, Serial, Joypad
 		inst:               lookup(0x00, false),                   // NOP
+    curCycle: 0xFF,
 	}
 	c.opFunc = c.NOP
 	return c
@@ -92,12 +93,8 @@ func (c *CPU) Cycle() {
 		// Execute next cycle of op
 		c.curCycle++
 		if c.setIME {
-			// if c.untilIME > 0 {
-			//   c.untilIME--
-			// } else {
 			c.IME = 1
 			c.setIME = false
-			// }
 		}
 
 		c.opFunc()
@@ -111,9 +108,6 @@ func (c *CPU) Cycle() {
 }
 
 func (c *CPU) DecodePrefix() {
-	// if intr := c.FetchIR(true); intr {
-	// 	return
-	// }
 	// Should interrupts be checked after prefix?
 	// Wouldn't that cause incorrect functions to run after a RET?
 	c.FetchIR(true)

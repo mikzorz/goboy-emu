@@ -18,9 +18,18 @@ type PPU struct {
 	oamSource                                              byte // high byte of oam source address
 	oamTransferI                                           byte // byte to fetch
 	oamByte                                                byte
-	mode                                                   int
+	mode                                                   ppuMode
 	dot                                                    int // current dot of scanline
 }
+
+type ppuMode int
+
+const (
+  MODE_HBLANK ppuMode = iota
+  MODE_VBLANK
+  MODE_OAMSCAN
+  MODE_DRAWING
+)
 
 func NewPPU() *PPU {
 	return &PPU{
@@ -55,10 +64,10 @@ func (p *PPU) Cycle() {
 		}
 
 		if p.LY >= 144 {
-			p.mode = 1
+			p.mode = MODE_VBLANK
 		} else {
 			if p.dot < 80 {
-				p.mode = 2
+				p.mode = MODE_OAMSCAN
 			} else {
 				// TODO if still drawing
 				// p.mode = 3
@@ -67,9 +76,9 @@ func (p *PPU) Cycle() {
 				// for now...
 				// if p.dot < 252 {
 				if p.dot < 80+int(TRUEWIDTH) {
-					p.mode = 3
+					p.mode = MODE_DRAWING
 				} else {
-					p.mode = 0
+					p.mode = MODE_HBLANK
 					// p.bus.lcd.x=0
 				}
 			}
@@ -126,28 +135,28 @@ func (p *PPU) Cycle() {
 
 func (p *PPU) Read(addr uint16) byte {
 	// TODO, if mode == oam scan, vram can be read if index 37 has been reached
-	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != 3 {
+	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != MODE_DRAWING {
 		return p.vram[addr-0x8000]
-	} else if addr >= 0xFE00 && addr <= 0xFE9F && p.mode <= 1 {
+	} else if addr >= 0xFE00 && addr <= 0xFE9F && (p.mode == MODE_HBLANK || p.mode == MODE_VBLANK) {
 		return p.oam[addr-0xFE00]
-	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == 2 {
+	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == MODE_OAMSCAN {
 		// OAM Corruption Bug
 		// If PPU is in mode 2, r/w to FE00-FEFF cause rubbish data (except for FE00 and FE04)
-		return 0xFF
+		return 0x00
 	}
 	return 0xFF
 }
 
 func (p *PPU) Write(addr uint16, data byte) {
 
-	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != 3 {
+	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != MODE_DRAWING {
 		p.vram[addr-0x8000] = data
 		if addr >= 0x9800 {
 			// log.Printf("%04X %02X", addr, data)
 		}
-	} else if addr >= 0xFE00 && addr <= 0xFE9F && p.mode <= 1 {
+	} else if addr >= 0xFE00 && addr <= 0xFE9F && (p.mode == MODE_HBLANK || p.mode == MODE_VBLANK) {
 		p.oam[addr-0xFE00] = data
-	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == 2 {
+	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == MODE_OAMSCAN {
 		// OAM Corruption Bug
 		// If PPU is in mode 2, r/w to FE00-FEFF cause rubbish data (except for FE00 and FE04)
 

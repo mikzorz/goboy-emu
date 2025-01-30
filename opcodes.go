@@ -17,30 +17,30 @@ const (
 
 	// Registers
 	A    register = "A"
-	B    register = "B"
-	C    register = "C"
-	mC   register = "[C]"
-	BC   register = "BC"
-	mBC  register = "[BC]"
-	D    register = "D"
-	E    register = "E"
-	DE   register = "DE"
-	mDE  register = "[DE]"
-	H    register = "H"
-	L    register = "L"
-	HL   register = "HL"
-	mHL  register = "[HL]"
-	mHLp register = "[HL+]"
-	mHLm register = "[HL-]"
-	SP   register = "SP"
-	SPe8 register = "SP + e8"
-	m8   register = "[a8]"
-	m16  register = "[a16]"
-	AF   register = "AF"
-	WZ   register = "WZ" // cpu 16bit buffer
-	W    register = "W"  // WZ hi byte buffer
-	Z    register = "Z"  // WZ lo byte buffer
-	PC   register = "PC"
+	B     = "B"
+	C     = "C"
+	mC    = "[C]"
+	BC    = "BC"
+	mBC   = "[BC]"
+	D     = "D"
+	E     = "E"
+	DE    = "DE"
+	mDE   = "[DE]"
+	H     = "H"
+	L     = "L"
+	HL    = "HL"
+	mHL   = "[HL]"
+	mHLp  = "[HL+]"
+	mHLm  = "[HL-]"
+	SP    = "SP"
+	SPe8  = "SP + e8"
+	m8    = "[a8]"
+	m16   = "[a16]"
+	AF    = "AF"
+	WZ    = "WZ" // cpu 16bit buffer
+	W     = "W"  // WZ hi byte buffer
+	Z     = "Z"  // WZ lo byte buffer
+	PC    = "PC"
 
 	// Flags
 	NOFLAG = "NOFLAG"
