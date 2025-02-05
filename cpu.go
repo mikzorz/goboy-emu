@@ -703,7 +703,8 @@ func (c *CPU) LDHLPlus() {
 func (c *CPU) LDHLMinus() {
 	switch c.curCycle {
 	case 0:
-		c.Read()
+		c.Read() // TODO According to some sources, HL- is done BEFORE, HL+ is after. Verify?
+    // IDU cant only post-inc/dec, not pre-inc/dec?
 		c.decrementReg(HL)
 	case 1:
 		c.SetRegister()

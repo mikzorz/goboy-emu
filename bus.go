@@ -53,6 +53,11 @@ func NewBus(cart *Cart) *Bus {
   b.dma.bus = b
 	b.clock.bus = b
 	b.lcd.bus = b
+
+  bgFIFO := NewFIFO()
+  b.ppu.bgFIFO = bgFIFO
+  b.lcd.bgFIFO = bgFIFO
+
 	return b
 }
 
@@ -68,7 +73,12 @@ func (b *Bus) Cycle() {
 		b.cpu.Cycle()
     b.dma.Cycle()
 	}
-	b.ppu.Cycle()
+  if b.clock.sysClock % 2 == 0 {
+  	b.ppu.Cycle()
+  }
+
+  b.lcd.Cycle()
+  
 	b.clock.Tick()
 }
 
@@ -151,6 +161,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 	case 0xFF26:
 		return b.NR52
 	case 0xFF40:
+    // TODO, bit 7 should always return 1, bits 0-2 return 0 if LCD is off.
 		return b.ppu.LCDC
 	case 0xFF41:
 		return b.ppu.STAT
@@ -162,6 +173,8 @@ func (b *Bus) ReadIO(addr uint16) byte {
 		return b.ppu.LY
 	case 0xFF45:
 		return b.ppu.LYC
+  case 0xFF46:
+    return b.dma.oamByte
 	case 0xFF47:
 		return b.ppu.BGP
 	case 0xFF48:
@@ -172,7 +185,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 		return b.ppu.WY
 	case 0xFF4B:
 		return b.ppu.WX // TODO sub 7?
-	case 0xFF03, 0xFF08, 0xFF09, 0xFF0A, 0xFF0B, 0xFF0C, 0xFF0D, 0xFF0E, 0xFF15, 0xFF1F, 0xFF46, 0xFF4C:
+	case 0xFF03, 0xFF08, 0xFF09, 0xFF0A, 0xFF0B, 0xFF0C, 0xFF0D, 0xFF0E, 0xFF15, 0xFF1F,  0xFF4C:
 		// undocumented
 		return 0
 	default:

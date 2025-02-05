@@ -88,22 +88,6 @@ var fontSize = 16
 var instructions map[uint16]string
 var tilePixels []byte
 
-// greyscale
-// var colours []color.RGBA = []color.RGBA{
-// 	color.RGBA{255, 255, 255, 255},
-// 	color.RGBA{150, 150, 150, 255},
-// 	color.RGBA{60, 60, 60, 255},
-// 	color.RGBA{0, 0, 0, 255},
-// }
-
-// green
-var colours []color.RGBA = []color.RGBA{
-	color.RGBA{155, 188, 15, 255},
-	color.RGBA{139, 172, 15, 255},
-	color.RGBA{48, 98, 48, 255},
-	color.RGBA{15, 56, 15, 255},
-}
-
 // main window
 // game screen size + some space.
 var window = Screen{
