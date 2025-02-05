@@ -146,13 +146,13 @@ func (p *PPU) setMode() {
     if p.dot == 0 {
       p.mode = MODE_OAMSCAN
       // p.savedObjects = []objects{} // TODO uncomment
-      p.fetcherReset = false
     } else if p.dot == 80 {
       p.mode = MODE_DRAWING
       p.oamScanI = 0
       // TODO: May need to sort objects from left-most x
       p.bgFIFO.Clear()
       p.fetchStep = 0
+      p.fetcherReset = false
     }
   }
 }
@@ -161,8 +161,8 @@ func (p *PPU) fetcherCycle() {
   switch p.fetchStep {
   case 0:
     // Fetch tile id from map
-    sx, sy := byte(p.bus.lcd.x), p.LY // TODO, add scrolling
-    p.tileID = p.getTileIDFromMap(sx, sy)
+    x, y := byte(p.bus.lcd.x), p.LY // TODO, add scrolling
+    p.tileID = p.getTileIDFromMap(x, y)
     p.fetchStep++
   case 1:
     // Fetch tile row low
@@ -196,36 +196,32 @@ func (p *PPU) getTileIDFromMap(x, y byte) byte {
   if utils.GetBit(3, p.LCDC) == 1 {
     mapAddr += 0x400
   }
-  tilex := x/8
-  tiley := y/8
-  // return p.bus.Read(0x9800 + uint16(x + (y/8)*32))
-  return p.vram[mapAddr + uint16(tilex) + uint16(tiley)*32]
+  tilex := ((x + p.SCX)/8) & 0x1F
+  tiley := ((y+p.SCY)/8)
+  offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
+  return p.vram[mapAddr + offset]
 }
 
 func (p *PPU) fetchTileDataLow(id, y byte) byte {
-  // baseAddr := uint16(0x8000)
   baseAddr := uint16(0x0000)
 	if utils.GetBit(4, p.LCDC) == 0 && id < 128 {
 		// Only for BG/Window, not OAM
 		baseAddr += 0x1000
 	}
   tileAddrOffset := uint16(id) * 16 // 16 bytes per tile
-  tileRowOffset := uint16(y % 8) * 2 // 2 bytes per row
-  // return p.bus.Read(tileRowAddr)
+  tileRowOffset := uint16((y+p.SCY) % 8) * 2 // 2 bytes per row
   return p.vram[baseAddr + tileAddrOffset + tileRowOffset]
 }
 
 func (p *PPU) fetchTileDataHigh(id, y byte) byte {
-  // baseAddr := uint16(0x8000)
   baseAddr := uint16(0x0000)
 	if utils.GetBit(4, p.LCDC) == 0 && id < 128 {
 		// Only for BG/Window, not OAM
 		baseAddr += 0x1000
 	}
-  tileBaseAddr := baseAddr + uint16(id) * 16
-  tileRowAddr := tileBaseAddr + uint16(y % 8) * 2
-  // return p.bus.Read(tileRowAddr + 1)
-  return p.vram[tileRowAddr+1]
+  tileAddrOffset := uint16(id) * 16 // 16 bytes per tile
+  tileRowOffset := uint16((y+p.SCY) % 8) * 2 // 2 bytes per row
+  return p.vram[baseAddr + tileAddrOffset + tileRowOffset + 1]
 }
 
 func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
