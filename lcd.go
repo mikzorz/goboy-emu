@@ -27,6 +27,7 @@ type LCD struct {
 	bus *Bus
   bgFIFO *FIFO
 	x, y   byte
+  pixelsToDiscard byte
 }
 
 func NewLCD() *LCD {
@@ -72,17 +73,21 @@ func (l *LCD) Cycle() {
 	// colourId := (utils.GetBit(bit, tileHi) << 1) | utils.GetBit(bit, tileLo)
 
   // log.Printf("PPU Mode: %s, len(bgFIFO): %d", l.bus.ppu.mode, len(*l.bgFIFO))
-  if l.bus.ppu.mode == MODE_DRAWING && l.bgFIFO.CanPopBG() {
-    pix := l.bgFIFO.Pop()
+    if l.bus.ppu.mode == MODE_DRAWING && l.bgFIFO.CanPopBG() {
+      pix := l.bgFIFO.Pop()
+      if l.pixelsToDiscard > 0 {
+        l.pixelsToDiscard--
+      } else {
 
-    paletteIdx := (pix.c * 2)
-    pal := bus.Read(0xFF47) // BGP
-    c := colours[(pal>>paletteIdx)&0x3]
+        paletteIdx := (pix.c * 2)
+        pal := bus.Read(0xFF47) // BGP
+        c := colours[(pal>>paletteIdx)&0x3]
 
-    // Draw from top-left
-    rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(l.bus.ppu.LY)-1, c)
+        // Draw from top-left
+        rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(l.bus.ppu.LY)-1, c)
 
-    l.x++
-  }
+        l.x++
+      }
+    }
   }
 }

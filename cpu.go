@@ -51,7 +51,6 @@ type CPU struct {
 	RegisterFile
 	ControlUnit
 	bus                BusI
-	interruptStep      int
 	interruptAddr      uint8
 	interruptAddresses []uint8
 
@@ -92,10 +91,10 @@ func (c *CPU) Cycle() {
 
 		// Execute next cycle of op
 		c.curCycle++
-		if c.setIME {
-			c.IME = 1
-			c.setIME = false
-		}
+		// if c.setIME {
+		// 	c.IME = 1
+		// 	c.setIME = false
+		// }
 
 		c.opFunc()
 
@@ -172,7 +171,6 @@ func (c *CPU) CheckInterrupts() (interrupted bool) {
 		if c.IME == 1 {
 			for bit := 0; bit <= 4; bit++ {
 				if utils.IsBitSet(bit, c.IF) && utils.IsBitSet(bit, c.IE) {
-					// c.interruptStep = 5
 					c.IME = 0
 					c.interruptAddr = c.interruptAddresses[bit]
 					c.IF = utils.ResetBit(bit, c.IF)
@@ -886,8 +884,8 @@ func (c *CPU) AddSPe8() {
 		res := c.Adjust(utils.MSB(c.SP), c.getCarry())
 		c.writeR8(W, res)
 	case 3:
-		c.SP = c.WZ
 		c.DecodeOp()
+		c.SP = c.WZ
 	}
 }
 
@@ -1267,16 +1265,16 @@ func (c *CPU) AddRelPC() {
 
 // Set IME to 1
 func (c *CPU) SetIME() {
-	c.untilIME = 2
-	c.setIME = true
+	// c.untilIME = 2
+	// c.setIME = true
 	c.DecodeOp()
-	// c.IME = 1
+	c.IME = 1
 }
 
 // Set IME to 0
 func (c *CPU) UnsetIME() {
 	c.IME = 0
-	c.setIME = false
+	// c.setIME = false
 	c.DecodeOp()
 }
 

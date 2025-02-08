@@ -10,13 +10,14 @@ type PPU struct {
 	vram                                                   [0x2000]byte
   bgFIFO *FIFO
 	LCDC, STAT, SCX, SCY, LY, LYC, BGP, OBP0, OBP1, WY, WX uint8 // move to LCD?
-	x                                                      int
+	x                                                      byte // tile x, internal to ppu fetcher
 	mode                                                   ppuMode
 	dot                                                    int // current dot of scanline
   oamScanI int // index of OAM to scan
   fetchStep int
   fetcherReset bool // for reseting background fetcher at beginning of each scanline
   tileID, tileLow, tileHigh byte
+  oldConditionState byte
 }
 
 type ppuMode string
@@ -54,11 +55,20 @@ func (p *PPU) Cycle() {
 	// if LCD/PPU are enabled
 	if utils.IsBitSet(7, p.LCDC) {
 
+		if p.dot == 0 {
+      if p.LY == p.LYC {
+        p.STAT |= 0x2
+      }
+
+      p.STATInterrupt() // STATInterrupt will enable or disable LYC bit of STAT as required
+    }
+
     p.setMode()
 
 		switch p.mode {
 		case MODE_OAMSCAN:
 			// OAM Scan
+      p.STAT = (p.STAT & 0xFC) | 0x02
       // TODO: uncomment
       // y := p.oam[p.oamScanI]
       // if len(p.savedObjects) < 10 && p.objectOnScanline(y) {
@@ -72,29 +82,25 @@ func (p *PPU) Cycle() {
         // Then window.
         // Then objects.
       
+      p.STAT = (p.STAT & 0xFC) | 0x03
       p.fetcherCycle()
 		case MODE_HBLANK:
 			// H-Blank
+      p.STAT = (p.STAT & 0xFC)
 		case MODE_VBLANK:
 			// V-Blank
-			p.bus.InterruptRequest(VBLANK_INTR)
-			p.STAT &= 0xFD // Mode 1
-		}
-
-		p.dot+=2
-		if p.dot >= 456 {
-			p.dot = 0
-			p.LY++
-      p.bus.lcd.x = 0
-		}
-
-		if p.LY == p.LYC && p.dot == 0 {
-			p.STAT = utils.SetBit(2, p.STAT)
-			// TODO may need to check STAT bits 6-3 to decide whether to interrupt
-			p.bus.InterruptRequest(LCDI_INTR)
+			// p.bus.InterruptRequest(VBLANK_INTR)
+      p.STAT = (p.STAT & 0xFC) | 0x01
 		}
 
 		// for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
+
+		p.dot+=2
+
+		if p.dot >= 456 {
+			p.dot = 0
+			p.LY++
+		}
 
 		if p.LY > 153 {
 			p.LY = 0
@@ -138,30 +144,47 @@ func (p *PPU) Write(addr uint16, data byte) {
 }
 
 func (p *PPU) setMode() {
-  if p.LY >= 144 {
-    p.mode = MODE_VBLANK
-  } else if int32(p.bus.lcd.x) >= TRUEWIDTH {
-    p.mode = MODE_HBLANK
-  } else {
+  if p.LY < 144 {
     if p.dot == 0 {
       p.mode = MODE_OAMSCAN
       // p.savedObjects = []objects{} // TODO uncomment
+      p.STAT = (p.STAT & 0xFC) | 0x02
+      p.STATInterrupt()
     } else if p.dot == 80 {
       p.mode = MODE_DRAWING
-      p.oamScanI = 0
+      p.STAT = (p.STAT & 0xFC) | 0x03
+      p.bus.lcd.pixelsToDiscard = p.SCX % 8
       // TODO: May need to sort objects from left-most x
+    } else if p.x >= 32 {
+      p.mode = MODE_HBLANK
+
+      p.STAT = (p.STAT & 0xFC)
+      p.oamScanI = 0
       p.bgFIFO.Clear()
       p.fetchStep = 0
       p.fetcherReset = false
+      p.x = 0
+      p.bus.lcd.x = 0
+
+      p.STATInterrupt()
     }
+  } else {
+    if p.mode != MODE_VBLANK {
+      p.mode = MODE_VBLANK
+      p.STAT = (p.STAT & 0xFC) | 0x01
+      p.STATInterrupt()
+      p.bus.InterruptRequest(VBLANK_INTR)
+    }
+
   }
 }
 
+// TODO: Have 2 fetchers, one for bg/window, 1 for sprites. Cycle both each ppu cycle.
 func (p *PPU) fetcherCycle() {
   switch p.fetchStep {
   case 0:
     // Fetch tile id from map
-    x, y := byte(p.bus.lcd.x), p.LY // TODO, add scrolling
+    x, y := p.x, p.LY // TODO, add scrolling
     p.tileID = p.getTileIDFromMap(x, y)
     p.fetchStep++
   case 1:
@@ -182,22 +205,25 @@ func (p *PPU) fetcherCycle() {
   case 3:
     // For non-bg, wait until FIFO has <= 8 pixels
     // For bg, wait until FIFO is empty
+
+    // Try to push every t-cycle?
     if p.bgFIFO.CanPushBG() {
       pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
       p.bgFIFO.Push(pixelData)
       p.fetchStep = 0
+      p.x++
     }
   }
 }
 
-// Given x and y (0-255) coordinates, find the corresponding map tile and return its value.
+// Given x (0-31) and y (0-255) coordinates, find the corresponding map tile and return its value.
 func (p *PPU) getTileIDFromMap(x, y byte) byte {
   mapAddr := uint16(0x1800)
   if utils.GetBit(3, p.LCDC) == 1 {
     mapAddr += 0x400
   }
-  tilex := ((x + p.SCX)/8) & 0x1F
-  tiley := ((y+p.SCY)/8)
+  tilex := (x + (p.SCX/8)) & 0x1F
+  tiley := ((y/8)+(p.SCY/8))
   offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
   return p.vram[mapAddr + offset]
 }
@@ -232,4 +258,30 @@ func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
     // pal := 
   }
   return data
+}
+
+// If condition is met when no conditions were met before, trigger STAT interrupt
+func (p *PPU) STATInterrupt() {
+  var conditionState byte
+
+  if p.LY == p.LYC {
+    p.STAT = utils.SetBit(2, p.STAT)
+    conditionState = utils.SetBit(6, conditionState)
+  }
+
+  switch p.mode {
+  case MODE_OAMSCAN:
+  conditionState = utils.SetBit(5, conditionState)
+  case MODE_HBLANK:
+  conditionState = utils.SetBit(3, conditionState)
+  case MODE_VBLANK:
+  conditionState = utils.SetBit(4, conditionState)
+  }
+
+  // Rising edge
+  if p.oldConditionState == 0 && conditionState > 0 {
+    p.bus.InterruptRequest(STAT_INTR)
+  }
+
+  p.oldConditionState = conditionState
 }

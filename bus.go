@@ -62,6 +62,7 @@ func NewBus(cart *Cart) *Bus {
 }
 
 func (b *Bus) Cycle() {
+  b.clock.sysClock++
 	// TODO don't tick if STOPped
 	if b.clock.sysClock%4 == 0 {
 		b.clock.UpdateTIMAState()
@@ -79,45 +80,55 @@ func (b *Bus) Cycle() {
 
   b.lcd.Cycle()
   
-	b.clock.Tick()
+	// b.clock.Tick()
+  b.clock.DIV++
 }
 
 func (b Bus) Read(addr uint16) byte {
-	switch {
-	case addr <= 0x7FFF:
-		// 0000-3FFF, cart bank X0
-		// 4000-7FFF, cart bank 01-NN
-		return b.cart.Read(addr)
-	case addr <= 0x9FFF:
-		// 8000-9FFF, vram
-		return b.ppu.Read(addr)
-	case addr <= 0xBFFF:
-		// A000-BFFF, cart ram
-		return b.cart.Read(addr)
-	case addr <= 0xDFFF:
-		// C000-DFFF, wram
-		return b.wram[addr-0xC000]
-	case addr <= 0xFDFF:
-		// E000-FDFF, echo ram, mirror C000-DDFF
-		return b.wram[addr-0xE000]
-	case addr <= 0xFE9F:
-		// FE00-FE9F, OAM
-		return b.ppu.Read(addr)
-	case addr <= 0xFEFF:
-		// FEA0-FEFF, Unused
-		return b.ppu.Read(addr)
-	case addr <= 0xFF7F:
-		// FF00-FF7F, IO
-		return b.ReadIO(addr)
-	case addr <= 0xFFFE:
-		// FF80-FFFE, hram
-		return b.hram[addr-0xFF80]
-	case addr <= 0xFFFF:
-		// FFFF, Interrupt Enable Register (IE)
-		return b.cpu.IE
-	default:
-		log.Panicf("unimplemented mem access 0x%04X", addr)
-	}
+  if b.dma.oamDMA {
+    switch {
+    case addr >= 0xFF80 && addr <= 0xFFFE:
+      return b.hram[addr-0xFF80]
+    default:
+      return b.dma.oamByte
+    }
+  } else {
+    switch {
+    case addr <= 0x7FFF:
+      // 0000-3FFF, cart bank X0
+      // 4000-7FFF, cart bank 01-NN
+      return b.cart.Read(addr)
+    case addr <= 0x9FFF:
+      // 8000-9FFF, vram
+      return b.ppu.Read(addr)
+    case addr <= 0xBFFF:
+      // A000-BFFF, cart ram
+      return b.cart.Read(addr)
+    case addr <= 0xDFFF:
+      // C000-DFFF, wram
+      return b.wram[addr-0xC000]
+    case addr <= 0xFDFF:
+      // E000-FDFF, echo ram, mirror C000-DDFF
+      return b.wram[addr-0xE000]
+    case addr <= 0xFE9F:
+      // FE00-FE9F, OAM
+      return b.ppu.Read(addr)
+    case addr <= 0xFEFF:
+      // FEA0-FEFF, Unused
+      return b.ppu.Read(addr)
+    case addr <= 0xFF7F:
+      // FF00-FF7F, IO
+      return b.ReadIO(addr)
+    case addr <= 0xFFFE:
+      // FF80-FFFE, hram
+      return b.hram[addr-0xFF80]
+    case addr <= 0xFFFF:
+      // FFFF, Interrupt Enable Register (IE)
+      return b.cpu.IE
+    default:
+      log.Panicf("unimplemented mem access 0x%04X", addr)
+    }
+  }
 	return 0
 }
 
@@ -202,6 +213,7 @@ func (b *Bus) ReadIO(addr uint16) byte {
 }
 
 func (b *Bus) Write(addr uint16, data byte) {
+  if !b.dma.oamDMA {
 	switch {
 	case (addr >= 0x0000 && addr <= 0x7FFF):
 		b.cart.Write(addr, data)
@@ -297,6 +309,9 @@ func (b *Bus) Write(addr uint16, data byte) {
 			b.ppu.LY = 0
 		case 0xFF45:
 			b.ppu.LYC = data
+      if b.ppu.LYC == b.ppu.LY {
+        b.ppu.STAT |= 0x2
+      }
 		case 0xFF46:
 			b.dma.StartOAMTransfer(data)
 		case 0xFF47:
@@ -329,6 +344,7 @@ func (b *Bus) Write(addr uint16, data byte) {
 			log.Panicf("tried to write 0x%02X to unimplemented address 0x%04X", data, addr)
 		}
 	}
+  }
 }
 
 func (b *Bus) isHalted() bool {
@@ -343,7 +359,7 @@ type interrupt int
 
 const (
 	VBLANK_INTR interrupt = iota
-	LCDI_INTR
+	STAT_INTR
 	TIMER_INTR
 	SERIAL_INTR
 	JOYPAD_INTR

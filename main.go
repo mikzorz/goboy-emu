@@ -10,9 +10,9 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const DEV = true
+// const DEV = true
 
-// const DEV = false
+const DEV = false
 
 var enableDebugInfo bool
 
