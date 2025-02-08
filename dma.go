@@ -22,6 +22,7 @@ func NewDMA() *DMA {
 
 func (d *DMA) Cycle() {
   if d.oamDMA {
+    d.oamDMA = false // give dma access to memory
     if d.oamTransferI == 0 {
       srcAddr := utils.JoinBytes(d.oamSource, d.oamTransferI)
       d.oamByte = d.bus.Read(srcAddr)
@@ -30,12 +31,14 @@ func (d *DMA) Cycle() {
 
       if d.oamTransferI >= 160 {
         d.oamDMA = false
+        return
       } else {
         srcAddr := utils.JoinBytes(d.oamSource, d.oamTransferI)
         d.oamByte = d.bus.Read(srcAddr)
       }
     }
     d.oamTransferI++
+    d.oamDMA = true // reblock memory from other hardware
   }
 }
 
