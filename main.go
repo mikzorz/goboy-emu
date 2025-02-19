@@ -10,15 +10,26 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// const DEV = true
+const DEV = true
 
-const DEV = false
+// const DEV = false
 
 var enableDebugInfo bool
 
 // Big TODO List
 
-// Draw OAM tiles in debug screen.
+// Change disassembler.
+//  Jump instructions can jump to instruction args.
+//  e.g. If there is a LD [xxyy], a jump could go to address containing xx or yy.
+//  Some test roms are doing that, but the disassembler currently doesn't show that properly.
+//  Maybe show current instruction + args, then just raw values for everything else.
+
+// So...
+// ADDR: (Op) INST N, N
+// ADDR+1: N
+// ADDR+2: N
+// ADDR+3: N
+
 
 // Pass more tests
 // Currently, instr_timing.gb fails during test setup
@@ -122,7 +133,7 @@ func setup() {
 
 		populatePrefixLookup()
 		if DEV {
-			instructions = disassemble(disAssembleStart, disAssembleEnd)
+			// instructions = disassemble(disAssembleStart, disAssembleEnd)
 			enableDebugInfo = true
 		} else {
 			gameWindow.x, gameWindow.y = 0, 0
@@ -174,8 +185,9 @@ func main() {
 
 			if enableDebugInfo {
 				disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
+				// disAssembleStart = bus.cpu.PC // 
 				disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
-				instructions = disassemble(disAssembleStart, disAssembleEnd)
+				// instructions = disassemble(disAssembleStart, disAssembleEnd)
 			}
 		} else {
 			for i := 0; i < 70224; i++ {

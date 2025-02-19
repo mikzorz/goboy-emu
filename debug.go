@@ -124,7 +124,8 @@ func drawDebugInfo() {
 		drawMem(memSelection*0x200, (memSelection+1)*0x200)
 	}
 	// drawMem(0x8000, 0xC000)
-	drawInstructions()
+	// drawInstructions()
+  drawInstruction()
 	drawRegisters()
 	drawIO()
 	tilePixels = getTileData()
@@ -160,52 +161,52 @@ func drawMem(start, end int) {
 	}
 }
 
-func drawInstructions() {
-	extra := instructionsPeekAmount
-
-	// instructions[PC]
-	s, ok := instructions[bus.cpu.PC]
-	if ok {
-		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + extra*fontSize)}, float32(fontSize), 0, rl.Magenta)
-	} else {
-
-		rl.DrawTextEx(debugFont, fmt.Sprintf("%04X", bus.cpu.PC), rl.Vector2{float32(debugX), float32(5 + extra*fontSize)}, float32(fontSize), 0, rl.Magenta) // Temporary, to reduce stuttering during early testing
-	}
-
-	// instructions above
-	var found = 0
-	addr := bus.cpu.PC
-	for found < extra {
-		if addr == 0 {
-			break
-		}
-		addr--
-		s, ok := instructions[addr]
-		if !ok {
-			continue
-		}
-
-		found++
-		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + (extra-found)*fontSize)}, float32(fontSize), 0, rl.LightGray)
-	}
-
-	// instructions below
-	found = 0
-	addr = bus.cpu.PC
-	for found < extra {
-		if addr == 0xFFFF {
-			break
-		}
-		addr++
-		s, ok := instructions[addr]
-		if !ok {
-			continue
-		}
-
-		found++
-		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + (extra+found)*fontSize)}, float32(fontSize), 0, rl.LightGray)
-	}
-}
+// func drawInstructions() {
+// 	extra := instructionsPeekAmount
+//
+// 	// instructions[PC]
+// 	s, ok := instructions[bus.cpu.PC]
+// 	if ok {
+// 		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + extra*fontSize)}, float32(fontSize), 0, rl.Magenta)
+// 	} else {
+//
+// 		rl.DrawTextEx(debugFont, fmt.Sprintf("%04X", bus.cpu.PC), rl.Vector2{float32(debugX), float32(5 + extra*fontSize)}, float32(fontSize), 0, rl.Magenta) // Temporary, to reduce stuttering during early testing
+// 	}
+//
+// 	// instructions above
+// 	var found = 0
+// 	addr := bus.cpu.PC
+// 	for found < extra {
+// 		if addr == 0 {
+// 			break
+// 		}
+// 		addr--
+// 		s, ok := instructions[addr]
+// 		if !ok {
+// 			continue
+// 		}
+//
+// 		found++
+// 		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + (extra-found)*fontSize)}, float32(fontSize), 0, rl.LightGray)
+// 	}
+//
+// 	// instructions below
+// 	found = 0
+// 	addr = bus.cpu.PC
+// 	for found < extra {
+// 		if addr == 0xFFFF {
+// 			break
+// 		}
+// 		addr++
+// 		s, ok := instructions[addr]
+// 		if !ok {
+// 			continue
+// 		}
+//
+// 		found++
+// 		rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + (extra+found)*fontSize)}, float32(fontSize), 0, rl.LightGray)
+// 	}
+// }
 
 func drawRegisters() {
 	cpu := bus.cpu
@@ -361,132 +362,224 @@ func drawOAM() {
   }
 }
 
-// Convert bytes to instruction strings, add them to map, ready for printing
-// Converted from Javidx9's nes emu tutorial code.
-func disassemble(startAddr, endAddr uint16) map[uint16]string {
-	var instructions = make(map[uint16]string)
+// // Convert bytes to instruction strings, add them to map, ready for printing
+// // Converted from Javidx9's nes emu tutorial code.
+// func disassemble(startAddr, endAddr uint16) map[uint16]string {
+// 	var instructions = make(map[uint16]string)
+//
+// 	addr := startAddr
+// 	for addr < endAddr {
+// 		instStr := fmt.Sprintf("%04X ", addr)
+// 		lineAddr := addr
+//
+// 		// cartridge header
+// 		// if addr >= 0x100 && addr <= 0x14F {
+// 		// 	addr++
+// 		// 	instructions[lineAddr] = instStr + "HEADER"
+// 		// 	continue
+// 		// }
+//
+// 		// Read byte from bus
+// 		opcode := bus.Read(addr)
+// 		addr++
+//
+// 		// Lookup opcode
+// 		inst := lookup(opcode, false)
+// 		instStr += inst.Op
+//
+// 		if inst.Op == "PREFIX" {
+// 			instructions[lineAddr] = instStr
+// 			instStr = fmt.Sprintf("%04X ", addr)
+// 			lineAddr = addr
+// 			opcode = bus.Read(addr)
+// 			addr++
+// 			inst = lookup(opcode, true)
+// 			instStr += inst.Op
+//
+// 			if (opcode >> 4) > 3 {
+// 				instStr += fmt.Sprintf(" %d", inst.Bit)
+// 			}
+// 			instStr += " " + string(inst.To)
+// 		} else {
+//
+// 			// Depending on inst type, read X amount of bytes and perform a certain action on them
+// 			switch inst.DataType {
+// 			case NODATA:
+// 				if inst.To != "" {
+// 					instStr += " " + string(inst.To)
+// 				}
+// 				if inst.From != "" {
+// 					instStr += fmt.Sprintf(", %s", inst.From)
+// 				}
+// 				if inst.Op == "RST" {
+// 					instStr += fmt.Sprintf(" %02X", inst.Abs)
+// 				} else if inst.Op == "RET" {
+// 					instStr += fmt.Sprintf(" %s", inst.Flag)
+// 				}
+// 			case N8:
+// 				n8 := bus.Read(addr)
+// 				addr++
+// 				instStr += fmt.Sprintf(" %s, 0x%02X", inst.To, n8)
+// 			case N16:
+// 				lo := bus.Read(addr)
+// 				addr++
+// 				hi := bus.Read(addr)
+// 				addr++
+// 				n16 := utils.JoinBytes(hi, lo)
+// 				instStr += fmt.Sprintf(" %s, 0x%04X", inst.To, n16)
+// 			case A8:
+// 				a8 := bus.Read(addr)
+// 				addr++
+//
+// 				if inst.To == m8 {
+// 					instStr += fmt.Sprintf(" [0xFF%02X]", a8)
+// 				} else if inst.To != "" {
+// 					instStr += " " + string(inst.To)
+// 				}
+//
+// 				if inst.From == m8 {
+// 					instStr += fmt.Sprintf(", [0xFF%02X]", a8)
+// 				} else if inst.From != "" {
+// 					instStr += fmt.Sprintf(", %s", inst.From)
+// 				}
+// 			case A16:
+// 				lo := bus.Read(addr)
+// 				addr++
+// 				hi := bus.Read(addr)
+// 				addr++
+// 				a16 := utils.JoinBytes(hi, lo)
+//
+// 				if inst.To == m16 {
+// 					instStr += fmt.Sprintf(" [0x%04X]", a16)
+// 				} else if inst.To != "" {
+// 					instStr += " " + string(inst.To) + ","
+// 				}
+//
+// 				if inst.From == m16 {
+// 					if inst.Op == "CALL" {
+// 						instStr += fmt.Sprintf(" 0x%04X", a16)
+// 					} else {
+// 						if inst.Flag != NOFLAG {
+// 							instStr += fmt.Sprintf(" %s,", inst.Flag)
+// 						}
+// 						instStr += fmt.Sprintf(" [0x%04X]", a16)
+// 					}
+// 				} else if inst.From != "" {
+// 					instStr += fmt.Sprintf(" %s", inst.From)
+// 				}
+// 			case E8:
+// 				n8 := bus.Read(addr)
+// 				addr++
+// 				e8 := int8(n8)
+// 				if inst.Flag != NOFLAG && inst.Flag != "" {
+// 					instStr += fmt.Sprintf(" %s,", inst.Flag)
+// 				}
+// 				if inst.To != "" {
+// 					// HL or SP
+// 					instStr += fmt.Sprintf(" %s,", inst.To)
+// 				}
+// 				instStr += fmt.Sprintf(" 0x%02X (%d)", n8, e8)
+// 			default:
+// 				log.Printf("Op: %s, disassembled unexpected DataType %v\n", inst.Op, inst.DataType)
+// 				// continue
+// 			}
+// 		}
+//
+// 		// Add string to map
+// 		instructions[lineAddr] = instStr
+// 	}
+//
+// 	return instructions
+// }
 
-	addr := startAddr
-	for addr < endAddr {
-		instStr := fmt.Sprintf("%04X ", addr)
-		lineAddr := addr
+// Draw the current instruction, with opcode and arguments, on the screen.
+func drawInstruction() {
+  inst := bus.cpu.inst
+  instOp := inst.Op
+  instAddr := bus.cpu.instAddr
 
-		// cartridge header
-		// if addr >= 0x100 && addr <= 0x14F {
-		// 	addr++
-		// 	instructions[lineAddr] = instStr + "HEADER"
-		// 	continue
-		// }
+  t := inst.To
+  f := inst.From
 
-		// Read byte from bus
-		opcode := bus.Read(addr)
-		addr++
+  // depending on instruction, figure out how many args to read, starting at current PC
 
-		// Lookup opcode
-		inst := lookup(opcode, false)
-		instStr += inst.Op
+  // args := []byte{}
+  s := ""
+  s = fmt.Sprintf("%04X: %s", instAddr, instOp)
 
-		if inst.Op == "PREFIX" {
-			instructions[lineAddr] = instStr
-			instStr = fmt.Sprintf("%04X ", addr)
-			lineAddr = addr
-			opcode = bus.Read(addr)
-			addr++
-			inst = lookup(opcode, true)
-			instStr += inst.Op
+  switch dt := bus.cpu.inst.DataType; dt {
+  case NODATA:
+    // Either no args, or args are registers / absolute values
+    if instOp == "RET" && inst.Flag != NOFLAG {
+      // RET
+      s += fmt.Sprintf(" %s", inst.Flag)
+    }
 
-			if (opcode >> 4) > 3 {
-				instStr += fmt.Sprintf(" %d", inst.Bit)
-			}
-			instStr += " " + string(inst.To)
-		} else {
+    if inst.To != "" {
+      s += fmt.Sprintf(" %s", t)
+    }
+    if inst.From != "" {
+      s += fmt.Sprintf(" %s", f)
+    }
+  case N8, A8:
+    // 1 arg
+    // args = append(args, bus.Read(instAddr+1))
+    if t != "" && t != m8 {
+      s += fmt.Sprintf(" %s", t)
+    }
+    s += fmt.Sprintf(" %02X", bus.Read(instAddr + 1))
+    if f != "" && f != m8 {
+      s += fmt.Sprintf(" %s", f)
+    }
+  case N16, A16:
+    // 2 args
 
-			// Depending on inst type, read X amount of bytes and perform a certain action on them
-			switch inst.DataType {
-			case NODATA:
-				if inst.To != "" {
-					instStr += " " + string(inst.To)
-				}
-				if inst.From != "" {
-					instStr += fmt.Sprintf(", %s", inst.From)
-				}
-				if inst.Op == "RST" {
-					instStr += fmt.Sprintf(" %02X", inst.Abs)
-				} else if inst.Op == "RET" {
-					instStr += fmt.Sprintf(" %s", inst.Flag)
-				}
-			case N8:
-				n8 := bus.Read(addr)
-				addr++
-				instStr += fmt.Sprintf(" %s, 0x%02X", inst.To, n8)
-			case N16:
-				lo := bus.Read(addr)
-				addr++
-				hi := bus.Read(addr)
-				addr++
-				n16 := utils.JoinBytes(hi, lo)
-				instStr += fmt.Sprintf(" %s, 0x%04X", inst.To, n16)
-			case A8:
-				a8 := bus.Read(addr)
-				addr++
+    if (instOp == "JP" || instOp == "CALL") && inst.Flag != NOFLAG {
+      s += fmt.Sprintf(" %s", inst.Flag)
+    }
 
-				if inst.To == m8 {
-					instStr += fmt.Sprintf(" [0xFF%02X]", a8)
-				} else if inst.To != "" {
-					instStr += " " + string(inst.To)
-				}
+    addr := utils.JoinBytes(bus.Read(instAddr + 2), bus.Read(instAddr + 1))
+    s += fmt.Sprintf(" %04X", addr)
+    // args = append(args, bus.Read(instAddr+1))
+    // args = append(args, bus.Read(instAddr+2))
+  case E8:
+    // 1 arg, with signed equivalent in parentheses (TODO)
+    // args = append(args, bus.Read(instAddr+1))
 
-				if inst.From == m8 {
-					instStr += fmt.Sprintf(", [0xFF%02X]", a8)
-				} else if inst.From != "" {
-					instStr += fmt.Sprintf(", %s", inst.From)
-				}
-			case A16:
-				lo := bus.Read(addr)
-				addr++
-				hi := bus.Read(addr)
-				addr++
-				a16 := utils.JoinBytes(hi, lo)
+    if (instOp == "JR") && inst.Flag != NOFLAG {
+      s += fmt.Sprintf(" %s", inst.Flag)
+    }
+    n8 := bus.Read(instAddr + 1)
+    s += fmt.Sprintf(" %02X", n8)
+		e8 := int8(n8)
+    s += fmt.Sprintf(" (%d)", e8)
+  default:
+    log.Fatalf("unhandled datatype %s", dt)
+  }
 
-				if inst.To == m16 {
-					instStr += fmt.Sprintf(" [0x%04X]", a16)
-				} else if inst.To != "" {
-					instStr += " " + string(inst.To) + ","
-				}
 
-				if inst.From == m16 {
-					if inst.Op == "CALL" {
-						instStr += fmt.Sprintf(" 0x%04X", a16)
-					} else {
-						if inst.Flag != NOFLAG {
-							instStr += fmt.Sprintf(" %s,", inst.Flag)
-						}
-						instStr += fmt.Sprintf(" [0x%04X]", a16)
-					}
-				} else if inst.From != "" {
-					instStr += fmt.Sprintf(" %s", inst.From)
-				}
-			case E8:
-				n8 := bus.Read(addr)
-				addr++
-				e8 := int8(n8)
-				if inst.Flag != NOFLAG && inst.Flag != "" {
-					instStr += fmt.Sprintf(" %s,", inst.Flag)
-				}
-				if inst.To != "" {
-					// HL or SP
-					instStr += fmt.Sprintf(" %s,", inst.To)
-				}
-				instStr += fmt.Sprintf(" 0x%02X (%d)", n8, e8)
-			default:
-				log.Printf("Op: %s, disassembled unexpected DataType %v\n", inst.Op, inst.DataType)
-				// continue
-			}
-		}
+  // s := fmt.Sprintf("%02X: %s", opcode, instOp)
+  //
+  // // if inst.From == m8 || inst.From == m16 {
+  // if inst.DataType == N8 || inst.DataType == A8 || inst.DataType == N16 || inst.DataType == A16 {
+  //   if inst.To != "" {
+  //     s += fmt.Sprintf(" %s", inst.To)
+  //   }
+  // }
+  //
+  // for _, a := range args {
+  //   s += fmt.Sprintf(" %02X", a)
+  // }
+  //
+  // // if inst.To == m8 || inst.To == m16 {
+  // if inst.DataType == N8 || inst.DataType == A8 || inst.DataType == N16 || inst.DataType == A16 {
+  //   if inst.From != "" {
+  //     s += fmt.Sprintf(" %s", inst.From)
+  //   }
+  // }
 
-		// Add string to map
-		instructions[lineAddr] = instStr
-	}
 
-	return instructions
-}
+		// rl.DrawTextEx(debugFont, "hello", rl.Vector2{float32(debugX), float32(5 + (1)*fontSize)}, float32(fontSize), 0, rl.LightGray)
+  rl.DrawTextEx(debugFont, fmt.Sprintf("PC: %04X", bus.cpu.PC), rl.Vector2{float32(debugX), float32(5)}, float32(fontSize), 0, rl.LightGray)
+	rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5+fontSize)}, float32(fontSize), 0, rl.LightGray)
+} 
