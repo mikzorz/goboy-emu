@@ -54,7 +54,7 @@ func TestLD(t *testing.T) {
 		b.rom[0x100] = 0x44
 		cpu.bus = b
 
-    setOpFuncFromIR(cpu, 0x3E, false)
+		setOpFuncFromIR(cpu, 0x3E, false)
 
 		cpu.Cycle()
 		cpu.Cycle()
@@ -62,7 +62,7 @@ func TestLD(t *testing.T) {
 		if cpu.A != 0x44 {
 			b.printLogs()
 			t.Errorf("cpu.A should be 0x%02X, got 0x%02X", 0x44, cpu.A)
-      t.Errorf("WZ: 0x%04X", cpu.WZ)
+			t.Errorf("WZ: 0x%04X", cpu.WZ)
 		}
 	})
 
@@ -75,7 +75,7 @@ func TestLD(t *testing.T) {
 		cpu.HL = 0x8000
 		cpu.SP = 0xE000
 
-    setOpFuncFromIR(cpu, 0xF8, false)
+		setOpFuncFromIR(cpu, 0xF8, false)
 
 		cpu.Cycle()
 		cpu.Cycle()
@@ -97,7 +97,7 @@ func TestLDH(t *testing.T) {
 		b.rom[0xff01] = 0x51
 		cpu.bus = b
 
-    setOpFuncFromIR(cpu, 0xF0, false)
+		setOpFuncFromIR(cpu, 0xF0, false)
 
 		// Z <- imm
 		cpu.Cycle()
@@ -121,7 +121,7 @@ func TestLDH(t *testing.T) {
 		cpu.A = 0x77
 		cpu.bus = b
 
-    setOpFuncFromIR(cpu, 0xE0, false)
+		setOpFuncFromIR(cpu, 0xE0, false)
 
 		cpu.Cycle()
 		cpu.Cycle()
@@ -155,7 +155,7 @@ func TestAdd(t *testing.T) {
 			cpu.HL = tt.hl
 			cpu.SP = tt.sp
 
-      setOpFuncFromIR(cpu, 0x39, false)
+			setOpFuncFromIR(cpu, 0x39, false)
 			cpu.clearFlags()
 
 			cpu.Cycle()
@@ -192,7 +192,7 @@ func TestAdd(t *testing.T) {
 
 			cpu.SP = tt.sp
 
-      setOpFuncFromIR(cpu, 0xE8, false)
+			setOpFuncFromIR(cpu, 0xE8, false)
 
 			for i := 0; i < 4; i++ {
 				cpu.Cycle()
@@ -207,9 +207,9 @@ func TestAdd(t *testing.T) {
 }
 
 func setOpFuncFromIR(cpu *CPU, ir byte, prefix bool) {
-  cpu.IR = ir
-  cpu.inst = lookup(cpu.IR, prefix)
-  cpu.SetOpFunc()
+	cpu.IR = ir
+	cpu.inst = lookup(cpu.IR, prefix)
+	cpu.SetOpFunc()
 }
 
 type busStub struct {
