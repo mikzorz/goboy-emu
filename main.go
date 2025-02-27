@@ -10,54 +10,31 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const DEV = true
+// const DEV = true
 
-// const DEV = false
+const DEV = false
+
+const GAMEBOY_DOCTOR = false
+
+var logfile *os.File
 
 var enableDebugInfo bool
 
 // Big TODO List
 
-// Change disassembler.
-//  Jump instructions can jump to instruction args.
-//  e.g. If there is a LD [xxyy], a jump could go to address containing xx or yy.
-//  Some test roms are doing that, but the disassembler currently doesn't show that properly.
-//  Maybe show current instruction + args, then just raw values for everything else.
+// - Pass more tests
 
-// So...
-// ADDR: (Op) INST N, N
-// ADDR+1: N
-// ADDR+2: N
-// ADDR+3: N
+// - When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
+//    End of test is JR to itself, causing infinite loop
 
+// - Audio
 
-// Pass more tests
-// Currently, instr_timing.gb fails during test setup
-//  The timer may trigger an interrupt slightly too late.
-// This could be a timer issue, but it could also be another instr taking the wrong amount of m-cycles.
-//  Look at the different ops used for timer setup, check their timings.
+// - My implementation of a bus is completely wrong for a gameboy. The gameboy has 2(?) main buses, 1 goes to vram via ppu? Buses do not have clocks.
 
-// When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
-// End of test is JR to itself, causing infinite loop
+// - Finish setting default values
+// - Rearrange components to match hardware more closely
 
-// Try adding basic audio for test beeps.
-
-// The GB might not have a bus...
-//  It does, but it doesn't have a clock or anything. It's just wires. No control.
-//  So, bus.cycle doesn't make much sense for a Gameboy
-
-// VRAM & OAM RAM belong to PPU, CPU goes via PPU, PPU can block CPU access to VRAM
-// 20 cycles of OAM search, 43 cycles of pixel transfer(drawing), 51 cycles of H-Blank
-// Pixel FIFO
-//  16 pixel buffer
-//  If contains more than 8 pixels, outputs 1 pixel per cycle.
-//  Pushes 2 pixels, fetches data. Repeats until new tile row is ready and space in FIFO.
-//    Fetch = get tile id, byte 1, byte 2
-// Finish setting default values
-// Rearrange components to match hardware more closely
-// Block off everything except HRAM during OAM_DMA? Necessary, or just for accuracy?
-
-// I would also make register read/writes less messy, with more descriptive functions.
+// - Check all of the other TODOs
 
 var joypadMap = map[int32]Button{
 	rl.KeyZ:         JoyA,
@@ -78,6 +55,7 @@ type Screen struct {
 	x, y int32
 }
 
+// const TRUEWIDTH int32 = 256 // Some test messages are too long to fit on the normal screen.
 const TRUEWIDTH int32 = 160
 const TRUEHEIGHT int32 = 144
 
@@ -113,7 +91,17 @@ var ppu = NewPPU()
 var cart = NewCart()
 var bus = NewBus(cart)
 
-func setup() {
+func ReadRomFile(c *Cart, romPath string) {
+	data, err := os.ReadFile(romPath)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// copy cart bytes from file to byte slice
+	c.LoadROMData(data)
+}
+
+func _init() {
 	flag.StringVar(&romPath, "rom", "", "The path to the rom file.")
 	flag.Parse()
 
@@ -123,13 +111,7 @@ func setup() {
 		os.Exit(1)
 	} else {
 		// fmt.Println(romPath)
-		data, err := os.ReadFile(romPath)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		// copy cart bytes from file to byte slice
-		cart.LoadROMData(data)
+		ReadRomFile(cart, romPath)
 
 		populatePrefixLookup()
 		if DEV {
@@ -140,12 +122,29 @@ func setup() {
 			window.w, window.h = gameWindow.w, gameWindow.h
 			enableDebugInfo = false
 		}
+
 	}
 }
 
 func main() {
 
-	setup()
+	_init()
+	if GAMEBOY_DOCTOR {
+		var err error
+		logfile, err = os.Create("gbdoctor_logfile.log")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer logfile.Close()
+		bus.screenDisabled = true
+		bus.alwaysVblank = true
+		for i := 0; i < 400000; i++ { // Not an endless loop, filled RAM accidentally.
+			for cycle := 0; cycle < 4; cycle++ {
+				bus.Cycle()
+			}
+		}
+		os.Exit(0)
+	}
 
 	rl.InitWindow(window.w, window.h, "Game Boy Emulator made in Go")
 	defer rl.CloseWindow()
@@ -185,7 +184,7 @@ func main() {
 
 			if enableDebugInfo {
 				disAssembleStart = bus.cpu.PC - instructionsPeekAmount - 10 // 10 margin
-				// disAssembleStart = bus.cpu.PC // 
+				// disAssembleStart = bus.cpu.PC //
 				disAssembleEnd = bus.cpu.PC + instructionsPeekAmount + 10
 				// instructions = disassemble(disAssembleStart, disAssembleEnd)
 			}

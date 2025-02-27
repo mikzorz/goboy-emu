@@ -1,7 +1,7 @@
 package main
 
 import (
-	// "fmt"
+	"fmt"
 	"github.com/mikzorz/gameboy-emulator/alu"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"log"
@@ -57,10 +57,13 @@ type CPU struct {
 	curCycle byte // current cycle of op
 
 	inst        Instruction // current instruction
+	instAddr    uint16      // address of opcode, for debugger
 	opFunc      func()
 	flagMatched bool
 	setIME      bool // IME setting is delayed 1 cycle
 	untilIME    int
+	haltBug     bool
+	skipLog     bool // for Gameboy Doctor, to not log after moving to interrupt vector
 }
 
 func NewCPU() *CPU {
@@ -68,25 +71,25 @@ func NewCPU() *CPU {
 		ALU: alu.ALU{},
 		IDU: IDU{},
 		RegisterFile: RegisterFile{
-			PC: 0x0100,
+			PC: 0x100,
 			A:  0x01,
 			F:  0xB0,
 			BC: 0x0013,
 			DE: 0x00D8,
 			HL: 0x014D,
 			SP: 0xFFFE,
+			IF: 0x01, // During boot rom, vblank requests are made. Set for lack of boot ram.
 		},
 		ControlUnit:        ControlUnit{},
 		interruptAddresses: []uint8{0x40, 0x48, 0x50, 0x58, 0x60}, // V-Blank, LCDC, Timer, Serial, Joypad
 		inst:               lookup(0x00, false),                   // NOP
-    curCycle: 0xFF,
+		curCycle:           0xFF,
 	}
 	c.opFunc = c.NOP
 	return c
 }
 
 func (c *CPU) Cycle() {
-
 	if !c.bus.isHalted() {
 
 		// Execute next cycle of op
@@ -208,6 +211,7 @@ func (c *CPU) MoveToInterrupt() {
 		c.pushPCToStack(LO)
 	case 4:
 		c.SetPC()
+		c.skipLog = true
 		c.DecodeOp()
 	}
 }
@@ -702,7 +706,7 @@ func (c *CPU) LDHLMinus() {
 	switch c.curCycle {
 	case 0:
 		c.Read() // TODO According to some sources, HL- is done BEFORE, HL+ is after. Verify?
-    // IDU cant only post-inc/dec, not pre-inc/dec?
+		// IDU cant only post-inc/dec, not pre-inc/dec?
 		c.decrementReg(HL)
 	case 1:
 		c.SetRegister()
@@ -884,8 +888,8 @@ func (c *CPU) AddSPe8() {
 		res := c.Adjust(utils.MSB(c.SP), c.getCarry())
 		c.writeR8(W, res)
 	case 3:
-		c.DecodeOp()
 		c.SP = c.WZ
+		c.DecodeOp()
 	}
 }
 
@@ -1069,6 +1073,20 @@ func (c *CPU) Fetch(hilo register) {
 }
 
 func (c *CPU) FetchIR(prefix bool) (interrupted bool) {
+	if GAMEBOY_DOCTOR && !prefix && !c.skipLog {
+		// c := b.cpu
+		B := utils.MSB(c.BC)
+		C := utils.LSB(c.BC)
+		D := utils.MSB(c.DE)
+		E := utils.LSB(c.DE)
+		H := utils.MSB(c.HL)
+		L := utils.LSB(c.HL)
+		pcm := []byte{}
+		for i := 0; i < 4; i++ {
+			pcm = append(pcm, c.bus.Read(c.PC+uint16(i)))
+		}
+		fmt.Fprintf(logfile, "A:%02X F:%02X B:%02X C:%02X D:%02X E:%02X H:%02X L:%02X SP:%04X PC:%04X PCMEM:%02X,%02X,%02X,%02X\n", c.A, c.F, B, C, D, E, H, L, c.SP, c.PC, pcm[0], pcm[1], pcm[2], pcm[3])
+	}
 
 	c.curCycle = 0xFF // after fetch, will be incremented to 0
 
@@ -1076,14 +1094,26 @@ func (c *CPU) FetchIR(prefix bool) (interrupted bool) {
 		return true
 	}
 
+	c.instAddr = c.PC
 	c.IR = c.imm8()
 
+	if c.haltBug {
+		c.PC--
+		c.haltBug = false
+	}
+
 	c.inst = lookup(c.IR, prefix)
+
+	c.skipLog = false
+	// if c.inst.Op == "NOP" {
+	//   c.skipLog = true
+	// }
 
 	return false
 }
 
 func (c *CPU) DecodeOp() {
+
 	if intr := c.FetchIR(false); intr {
 		return
 	}
@@ -1115,6 +1145,7 @@ func (c *CPU) SetOpFunc() {
 			c.bus.setHalt(true)
 			if c.IME == 0 && (c.IE&c.IF != 0) {
 				c.bus.setHalt(false)
+				c.haltBug = true
 				c.DecodeOp()
 			}
 		}

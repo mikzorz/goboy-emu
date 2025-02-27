@@ -1,10 +1,10 @@
 package main
 
 import (
-  // "log"
-	"image/color"
+	// "log"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
+	"image/color"
 )
 
 // greyscale
@@ -23,71 +23,99 @@ var colours []color.RGBA = []color.RGBA{
 	color.RGBA{15, 56, 15, 255},
 }
 
+type LCDI interface {
+	Cycle()
+	SetBus(b *Bus)
+	SetBgFIFO(f *FIFO)
+	SetObjFIFO(f *FIFO)
+	GetX() byte
+	SetX(byte)
+	SetPixelsToDiscard(byte)
+}
+
 type LCD struct {
-	bus *Bus
-  bgFIFO *FIFO
-	x, y   byte
-  pixelsToDiscard byte
+	bus             *Bus
+	bgFIFO          *FIFO
+	objFIFO         *FIFO
+	x, y            byte
+	pixelsToDiscard byte
 }
 
 func NewLCD() *LCD {
 	return &LCD{}
 }
 
-		// pixels that are scrolled left of screen are not skipped, they are discarded one dot at a time.
-
-		// For each scanline, during OAM scan, check each object in OAM from FF00-FF9F and compares y values with LY. LCDC Bit.2 for obj size. Up to 10 objects are selected. Off-screen objects count, because x-coord isn't checked.
-
-		// When 2 opaque pixels overlap, for non-CGB, lower x-coord wins. If x-coords match, first object in OAM wins.
-
-		// After an object pixel has been determined, only then is transparency checked.
-
-		// when lcdc bit 0 is cleared, screen becomes blank white. window and sprites may still be displayed depending on bits 1 and 5.
+// when lcdc bit 0 is cleared, screen becomes blank white. window and sprites may still be displayed depending on bits 1 and 5.
 
 func (l *LCD) Cycle() {
 	if utils.IsBitSet(7, l.bus.ppu.LCDC) {
-	// crudely get current tile based on x and y coord of current dot, no scrolling
-  // TODO, move most/all of the computation to the PPU
-  // OAM scan in PPU, FIFO in LCD
-	// y := l.bus.ppu.LY
-	// tx := uint16(l.x / 8)
-	// ty := uint16(y / 8)
-	// tileId := uint16(l.bus.ppu.vram[0x1800+ty*32+tx])
-	//
-	// // Get tile data
-	// tileDataAddr := tileId*16 + uint16(y%8)*2
-	// if utils.GetBit(4, l.bus.ppu.LCDC) == 0 && tileId < 128 {
-	// 	// Only for BG/Window, not OAM
-	// 	tileDataAddr += 0x1000
-	// }
-	//
-	//  // 2 bytes for row of 8 pixels
-	// tileLo := l.bus.ppu.vram[tileDataAddr]
-	// tileHi := l.bus.ppu.vram[tileDataAddr+1]
-	//
-	//  // Get current pixel position within row
-	// column := l.x % 8
-	// bit := int(7 - column)
-	//
-	//  // Merge bit pair, get corresponding colourID from BGP
-	// colourId := (utils.GetBit(bit, tileHi) << 1) | utils.GetBit(bit, tileLo)
 
-  // log.Printf("PPU Mode: %s, len(bgFIFO): %d", l.bus.ppu.mode, len(*l.bgFIFO))
-    if l.bus.ppu.mode == MODE_DRAWING && l.bgFIFO.CanPopBG() {
-      pix := l.bgFIFO.Pop()
-      if l.pixelsToDiscard > 0 {
-        l.pixelsToDiscard--
-      } else {
+		// log.Printf("PPU Mode: %s, len(bgFIFO): %d", l.bus.ppu.mode, len(*l.bgFIFO))
+		if l.bus.ppu.mode == MODE_DRAWING && int32(l.x) < TRUEWIDTH && l.bgFIFO.CanPop() && !l.bus.ppu.fetchingObject {
+			bgPix := l.bgFIFO.Pop()
+			objPix := Pixel{}
+			if l.objFIFO.CanPop() { // Rename CanPopBG
+				objPix = l.objFIFO.Pop()
+			}
 
-        paletteIdx := (pix.c * 2)
-        pal := bus.Read(0xFF47) // BGP
-        c := colours[(pal>>paletteIdx)&0x3]
+			if l.pixelsToDiscard > 0 {
+				l.pixelsToDiscard--
+			} else {
 
-        // Draw from top-left
-        rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(l.bus.ppu.LY)-1, c)
+				pix := Pixel{}
+				var palAddr uint16
 
-        l.x++
-      }
-    }
-  }
+				if !utils.IsBitSet(0, l.bus.ppu.LCDC) {
+					bgPix.c = 0
+				}
+
+				if !utils.IsBitSet(1, l.bus.ppu.LCDC) {
+					objPix.c = 0
+				}
+
+				if (objPix.bgPriority == 1 && bgPix.c != 0) || objPix.c == 0 {
+					pix.c = bgPix.c
+					palAddr = 0xFF47
+				} else {
+					pix.c = objPix.c
+					palAddr = 0xFF48 + uint16(objPix.pal)
+				}
+
+				paletteIdx := (pix.c * 2)
+				pal := bus.Read(palAddr)
+				c := colours[(pal>>paletteIdx)&0x3]
+
+				// Draw from top-left
+				if !l.bus.screenDisabled {
+					rl.DrawPixel(int32(l.x), TRUEHEIGHT-int32(l.bus.ppu.LY)-1, c)
+				}
+
+				l.x++
+			}
+		}
+	}
+}
+
+func (l *LCD) SetBus(b *Bus) {
+	l.bus = b
+}
+
+func (l *LCD) SetBgFIFO(f *FIFO) {
+	l.bgFIFO = f
+}
+
+func (l *LCD) SetObjFIFO(f *FIFO) {
+	l.objFIFO = f
+}
+
+func (l *LCD) GetX() byte {
+	return l.x
+}
+
+func (l *LCD) SetX(val byte) {
+	l.x = val
+}
+
+func (l *LCD) SetPixelsToDiscard(amount byte) {
+	l.pixelsToDiscard = amount
 }

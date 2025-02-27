@@ -5,6 +5,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"log"
+	"reflect"
 	"strings"
 )
 
@@ -125,17 +126,24 @@ func drawDebugInfo() {
 	}
 	// drawMem(0x8000, 0xC000)
 	// drawInstructions()
-  drawInstruction()
+	drawInstruction()
 	drawRegisters()
-	drawIO()
+	drawTimers()
 	tilePixels = getTileData()
 	drawTiles()
-  drawOAM()
+	drawOAM()
 
-  // Extra info (may or may not be actual registers)
-	rl.DrawTextEx(debugFont, fmt.Sprintf("Dot: %d", bus.ppu.dot), rl.Vector2{float32(debugX + 150), float32(100 - fontSize)}, float32(fontSize), 0, rl.LightGray)
-	rl.DrawTextEx(debugFont, fmt.Sprintf("X: %d", bus.lcd.x), rl.Vector2{float32(debugX + 150), float32(100 - 2*fontSize)}, float32(fontSize), 0, rl.LightGray)
-	rl.DrawTextEx(debugFont, fmt.Sprintf("tcycle: %d", curCycle), rl.Vector2{float32(debugX + 150), float32(100 - 3*fontSize)}, float32(fontSize), 0, rl.LightGray)
+	// Extra info (may or may not be actual registers)
+	// TODO: Tidy this up
+	drawRegister(curCycle, "tcycle", 0, 5)
+	drawRegister(bus.ppu.dot, "dot", 0, 6)
+	drawRegister(bus.ppu.x, "ppu x", 0, 7)
+	drawRegister(bus.lcd.GetX(), "lcd x", 0, 8)
+	drawRegister(bus.ppu.SCX, "SCX", 0, 9)
+	drawRegister(bus.ppu.SCY, "SCY", 0, 10)
+	drawRegister(string(bus.ppu.mode), "Mode", 0, 11)
+	drawRegister(bus.dma.oamDMA, "DMA", 0, 12)
+	drawRegister(utils.GetBit(7, bus.ppu.LCDC), "LCD On", 0, 13)
 
 	rl.DrawTextEx(debugFont, "<-, -> Change Speed, ^, v Scroll Ram, [Space] Pause/Unpause, [A] 1 M-Cycle, [S] 1 Op, [D] 100 Ops, [M] Toggle Mem/Screen, [LCtrl] Toggle Debugger", rl.Vector2{float32(5), float32(window.h - 5 - int32(fontSize))}, float32(fontSize), 0, rl.Blue)
 }
@@ -230,7 +238,7 @@ func drawRegisters() {
 
 }
 
-func drawIO() {
+func drawTimers() {
 	c := bus.clock
 	drawRegister(bus.Read(0xFF44), "LY", 1, 2)
 	drawRegister(c.DIV, "DIV", 2, 2)
@@ -239,6 +247,7 @@ func drawIO() {
 	drawRegister(c.TAC, "TAC", 5, 2)
 }
 
+// TODO: rename
 func drawRegister(r interface{}, name string, col, row int) {
 	var s string
 	switch r.(type) {
@@ -246,8 +255,14 @@ func drawRegister(r interface{}, name string, col, row int) {
 		s = fmt.Sprintf("%2s: %02X", name, r)
 	case uint16:
 		s = fmt.Sprintf("%2s: %04X", name, r)
+	case int:
+		s = fmt.Sprintf("%2s: %d", name, r)
+	case bool:
+		s = fmt.Sprintf("%2s: %t", name, r)
+	case string:
+		s = fmt.Sprintf("%2s: %s", name, r)
 	default:
-		log.Fatalf("first arg to drawRegister must be either byte or uint16")
+		log.Fatalf("first arg to drawRegister unhandled, got %s", reflect.TypeOf(r))
 	}
 	rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX + int32(150+col*4*fontSize)), float32(row*fontSize + 5)}, float32(fontSize), 0, rl.LightGray)
 }
@@ -255,26 +270,26 @@ func drawRegister(r interface{}, name string, col, row int) {
 // Find all current tiledata from IDs in VRAM and return as []byte.
 func getTileData() []byte {
 	// var tileAddrStart uint16 = 0x8000
-	var tileCount = 384                     // DMG
+	var tileCount = 384   // DMG
 	var pixels = []byte{} // tiles * 8x8 pixels
 
-  for t := 0; t < tileCount; t++ {
-    tilePixels := getTileDataByID(t)
-    pixels = append(pixels, tilePixels...)
-  }
+	for t := 0; t < tileCount; t++ {
+		tilePixels := getTileDataByID(t)
+		pixels = append(pixels, tilePixels...)
+	}
 
 	return pixels
 }
 
 // Return []byte containing 64 colour IDs, row by row.
 func getTileDataByID(tileID int) []byte {
-  pixels := make([]byte, 64)
-  // For each row of 8 pixels
-  //  Get the low and high bytes
-  //  Pair nth bits of each byte to get colour ID
-  //  Save colour ID to a []byte
+	pixels := make([]byte, 64)
+	// For each row of 8 pixels
+	//  Get the low and high bytes
+	//  Pair nth bits of each byte to get colour ID
+	//  Save colour ID to a []byte
 	for tRow := 0; tRow < 8; tRow++ {
-		rAddr := uint16((tileID * 8 + tRow) * 2)
+		rAddr := uint16((tileID*8 + tRow) * 2)
 		loByte := bus.ppu.vram[rAddr]
 		hiByte := bus.ppu.vram[rAddr+1]
 		for b := 7; b >= 0; b-- {
@@ -285,7 +300,7 @@ func getTileDataByID(tileID int) []byte {
 		}
 	}
 
-  return pixels
+	return pixels
 }
 
 // Draw tile data image in debug area.
@@ -321,45 +336,45 @@ func drawTile(pixels []byte, idx int, x, y int32, palAddr uint16) {
 
 // Find all current OAM data from IDs in OAM and return as []byte.
 func getOAMTileIDs() []byte {
-  var objectCount = 40
-  // var oamAddr = 0xFE00
-  
-  // Every 4th tile, starting from FE02, is a tile index
-  tileIndices := []byte{}
-  for o := 0; o < objectCount; o++ {
-    tileIndices = append(tileIndices, bus.dma.oam[o * 4 + 2])
-  }
+	var objectCount = 40
+	// var oamAddr = 0xFE00
 
-  return tileIndices
+	// Every 4th tile, starting from FE02, is a tile index
+	tileIndices := []byte{}
+	for o := 0; o < objectCount; o++ {
+		tileIndices = append(tileIndices, bus.dma.oam[o*4+2])
+	}
+
+	return tileIndices
 }
 
 func getOAMPixels() []byte {
-  pixels := []byte{}
-  ids := getOAMTileIDs()
-  for _, id := range ids {
-    tilePixels := getTileDataByID(int(id)) // TODO, account for bit.4 of byte 3 of oam data, DMG palette
-    pixels = append(pixels, tilePixels...)
-  }
-  return pixels
+	pixels := []byte{}
+	ids := getOAMTileIDs()
+	for _, id := range ids {
+		tilePixels := getTileDataByID(int(id)) // TODO, account for bit.4 of byte 3 of oam data, DMG palette
+		pixels = append(pixels, tilePixels...)
+	}
+	return pixels
 }
 
 func drawOAM() {
-  tilesPerRow := 5
-  tilesPerColumn := 8
-  // pixPerRow := tilesPerRow * 8
-  pixPerTile := 64
+	tilesPerRow := 5
+	tilesPerColumn := 8
+	// pixPerRow := tilesPerRow * 8
+	pixPerTile := 64
 
-  pixels := getOAMPixels()
+	pixels := getOAMPixels()
 
-  for ty := 0; ty < tilesPerColumn; ty++ {
-    tyOffset := ty * tilesPerRow * pixPerTile
-    for tx := 0; tx < tilesPerRow; tx++ {
-      txOffset := tx * pixPerTile
-      idx := tyOffset + txOffset
-      // 3*(16*8+1) puts OAM tiles after tile maps
+	for ty := 0; ty < tilesPerColumn; ty++ {
+		tyOffset := ty * tilesPerRow * pixPerTile
+		for tx := 0; tx < tilesPerRow; tx++ {
+			txOffset := tx * pixPerTile
+			idx := tyOffset + txOffset
+			// 3*(16*8+1) puts OAM tiles after tile maps
 			drawTile(pixels, idx, debugX+int32(3*(16*8+1)+tx*8), window.h-64-5-int32(fontSize)+int32(ty*8), 0xFF47)
-    }
-  }
+		}
+	}
 }
 
 // // Convert bytes to instruction strings, add them to map, ready for printing
@@ -494,92 +509,72 @@ func drawOAM() {
 
 // Draw the current instruction, with opcode and arguments, on the screen.
 func drawInstruction() {
-  inst := bus.cpu.inst
-  instOp := inst.Op
-  instAddr := bus.cpu.instAddr
+	inst := bus.cpu.inst
+	instOp := inst.Op
+	instAddr := bus.cpu.instAddr
 
-  t := inst.To
-  f := inst.From
+	t := inst.To
+	f := inst.From
 
-  // depending on instruction, figure out how many args to read, starting at current PC
+	// depending on instruction, figure out how many args to read, starting at current PC
+	s := fmt.Sprintf("%04X: %s", instAddr, instOp)
 
-  // args := []byte{}
-  s := ""
-  s = fmt.Sprintf("%04X: %s", instAddr, instOp)
+	switch dt := bus.cpu.inst.DataType; dt {
+	case NODATA:
+		// Either no args, or args are registers / absolute values
+		if instOp == "RET" && inst.Flag != NOFLAG {
+			// RET
+			s += fmt.Sprintf(" %s", inst.Flag)
+		} else if instOp == "RST" {
+			s += fmt.Sprintf(" %02X", inst.Abs)
+		}
 
-  switch dt := bus.cpu.inst.DataType; dt {
-  case NODATA:
-    // Either no args, or args are registers / absolute values
-    if instOp == "RET" && inst.Flag != NOFLAG {
-      // RET
-      s += fmt.Sprintf(" %s", inst.Flag)
-    }
+		if inst.Prefixed {
+			s += fmt.Sprintf(" %d", inst.Bit)
+		}
 
-    if inst.To != "" {
-      s += fmt.Sprintf(" %s", t)
-    }
-    if inst.From != "" {
-      s += fmt.Sprintf(" %s", f)
-    }
-  case N8, A8:
-    // 1 arg
-    // args = append(args, bus.Read(instAddr+1))
-    if t != "" && t != m8 {
-      s += fmt.Sprintf(" %s", t)
-    }
-    s += fmt.Sprintf(" %02X", bus.Read(instAddr + 1))
-    if f != "" && f != m8 {
-      s += fmt.Sprintf(" %s", f)
-    }
-  case N16, A16:
-    // 2 args
+		if inst.To != "" {
+			s += fmt.Sprintf(" %s", t)
+		}
+		if inst.From != "" && !inst.Prefixed {
+			s += fmt.Sprintf(" %s", f)
+		}
+	case N8, A8:
+		// 1 arg
+		if t != "" && t != m8 {
+			s += fmt.Sprintf(" %s", t)
+		}
+		s += fmt.Sprintf(" %02X", bus.Read(instAddr+1))
+		if f != "" && f != m8 {
+			s += fmt.Sprintf(" %s", f)
+		}
+	case N16, A16:
+		// 2 args
 
-    if (instOp == "JP" || instOp == "CALL") && inst.Flag != NOFLAG {
-      s += fmt.Sprintf(" %s", inst.Flag)
-    }
+		if (instOp == "JP" || instOp == "CALL") && inst.Flag != NOFLAG {
+			s += fmt.Sprintf(" %s", inst.Flag)
+		}
 
-    addr := utils.JoinBytes(bus.Read(instAddr + 2), bus.Read(instAddr + 1))
-    s += fmt.Sprintf(" %04X", addr)
-    // args = append(args, bus.Read(instAddr+1))
-    // args = append(args, bus.Read(instAddr+2))
-  case E8:
-    // 1 arg, with signed equivalent in parentheses (TODO)
-    // args = append(args, bus.Read(instAddr+1))
+		if inst.To != "" {
+			s += fmt.Sprintf(" %s", t)
+		}
 
-    if (instOp == "JR") && inst.Flag != NOFLAG {
-      s += fmt.Sprintf(" %s", inst.Flag)
-    }
-    n8 := bus.Read(instAddr + 1)
-    s += fmt.Sprintf(" %02X", n8)
+		addr := utils.JoinBytes(bus.Read(instAddr+2), bus.Read(instAddr+1))
+		s += fmt.Sprintf(" %04X", addr)
+	case E8:
+		// 1 arg, with signed equivalent in parentheses (TODO)
+
+		if (instOp == "JR") && inst.Flag != NOFLAG {
+			s += fmt.Sprintf(" %s", inst.Flag)
+		}
+		n8 := bus.Read(instAddr + 1)
+		s += fmt.Sprintf(" %02X", n8)
 		e8 := int8(n8)
-    s += fmt.Sprintf(" (%d)", e8)
-  default:
-    log.Fatalf("unhandled datatype %s", dt)
-  }
+		s += fmt.Sprintf(" (%d)", e8)
+	default:
+		log.Fatalf("unhandled datatype %s", dt)
+	}
 
-
-  // s := fmt.Sprintf("%02X: %s", opcode, instOp)
-  //
-  // // if inst.From == m8 || inst.From == m16 {
-  // if inst.DataType == N8 || inst.DataType == A8 || inst.DataType == N16 || inst.DataType == A16 {
-  //   if inst.To != "" {
-  //     s += fmt.Sprintf(" %s", inst.To)
-  //   }
-  // }
-  //
-  // for _, a := range args {
-  //   s += fmt.Sprintf(" %02X", a)
-  // }
-  //
-  // // if inst.To == m8 || inst.To == m16 {
-  // if inst.DataType == N8 || inst.DataType == A8 || inst.DataType == N16 || inst.DataType == A16 {
-  //   if inst.From != "" {
-  //     s += fmt.Sprintf(" %s", inst.From)
-  //   }
-  // }
-
-
-		// rl.DrawTextEx(debugFont, "hello", rl.Vector2{float32(debugX), float32(5 + (1)*fontSize)}, float32(fontSize), 0, rl.LightGray)
-  rl.DrawTextEx(debugFont, fmt.Sprintf("PC: %04X", bus.cpu.PC), rl.Vector2{float32(debugX), float32(5)}, float32(fontSize), 0, rl.LightGray)
-	rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5+fontSize)}, float32(fontSize), 0, rl.LightGray)
-} 
+	rl.DrawTextEx(debugFont, fmt.Sprintf("PC: %04X", bus.cpu.PC), rl.Vector2{float32(debugX), float32(5)}, float32(fontSize), 0, rl.LightGray)
+	rl.DrawTextEx(debugFont, s, rl.Vector2{float32(debugX), float32(5 + fontSize)}, float32(fontSize), 0, rl.LightGray)
+}

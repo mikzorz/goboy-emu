@@ -17,30 +17,30 @@ const (
 
 	// Registers
 	A    register = "A"
-	B     = "B"
-	C     = "C"
-	mC    = "[C]"
-	BC    = "BC"
-	mBC   = "[BC]"
-	D     = "D"
-	E     = "E"
-	DE    = "DE"
-	mDE   = "[DE]"
-	H     = "H"
-	L     = "L"
-	HL    = "HL"
-	mHL   = "[HL]"
-	mHLp  = "[HL+]"
-	mHLm  = "[HL-]"
-	SP    = "SP"
-	SPe8  = "SP + e8"
-	m8    = "[a8]"
-	m16   = "[a16]"
-	AF    = "AF"
-	WZ    = "WZ" // cpu 16bit buffer
-	W     = "W"  // WZ hi byte buffer
-	Z     = "Z"  // WZ lo byte buffer
-	PC    = "PC"
+	B             = "B"
+	C             = "C"
+	mC            = "[C]"
+	BC            = "BC"
+	mBC           = "[BC]"
+	D             = "D"
+	E             = "E"
+	DE            = "DE"
+	mDE           = "[DE]"
+	H             = "H"
+	L             = "L"
+	HL            = "HL"
+	mHL           = "[HL]"
+	mHLp          = "[HL+]"
+	mHLm          = "[HL-]"
+	SP            = "SP"
+	SPe8          = "SP + e8"
+	m8            = "[a8]"
+	m16           = "[a16]"
+	AF            = "AF"
+	WZ            = "WZ" // cpu 16bit buffer
+	W             = "W"  // WZ hi byte buffer
+	Z             = "Z"  // WZ lo byte buffer
+	PC            = "PC"
 
 	// Flags
 	NOFLAG = "NOFLAG"
@@ -57,8 +57,9 @@ type Instruction struct {
 	From     register // 2nd value is taken from here, but not stored here. The name 'From' might be weird for SUB but whatever
 	Flag     string
 	// Len      int
-	Bit int
-	Abs byte // For RST, absolute address
+	Bit      int
+	Abs      byte // For RST, absolute address
+	Prefixed bool
 }
 
 // Could have probably used bit masking and whatnot. Oh well... maybe in version 2...
@@ -334,72 +335,72 @@ func getPrefixInstructionFromOp(b byte) Instruction {
 	if b&0xF < 8 {
 		switch b >> 4 {
 		case 0x0:
-			return Instruction{Op: "RLC", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "RLC", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x1:
-			return Instruction{Op: "RL", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "RL", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x2:
-			return Instruction{Op: "SLA", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "SLA", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x3:
-			return Instruction{Op: "SWAP", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "SWAP", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x4:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 0}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 0, Prefixed: true}
 		case 0x5:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 2}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 2, Prefixed: true}
 		case 0x6:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 4}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 4, Prefixed: true}
 		case 0x7:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 6}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 6, Prefixed: true}
 		case 0x8:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 0}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 0, Prefixed: true}
 		case 0x9:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 2}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 2, Prefixed: true}
 		case 0xA:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 4}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 4, Prefixed: true}
 		case 0xB:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 6}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 6, Prefixed: true}
 		case 0xC:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 0}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 0, Prefixed: true}
 		case 0xD:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 2}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 2, Prefixed: true}
 		case 0xE:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 4}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 4, Prefixed: true}
 		case 0xF:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 6}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 6, Prefixed: true}
 		}
 	} else {
 		switch b >> 4 {
 		case 0x0:
-			return Instruction{Op: "RRC", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "RRC", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x1:
-			return Instruction{Op: "RR", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "RR", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x2:
-			return Instruction{Op: "SRA", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "SRA", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x3:
-			return Instruction{Op: "SRL", DataType: NODATA, To: r, From: r}
+			return Instruction{Op: "SRL", DataType: NODATA, To: r, From: r, Prefixed: true}
 		case 0x4:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 1}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 1, Prefixed: true}
 		case 0x5:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 3}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 3, Prefixed: true}
 		case 0x6:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 5}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 5, Prefixed: true}
 		case 0x7:
-			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 7}
+			return Instruction{Op: "BIT", DataType: NODATA, To: r, From: r, Bit: 7, Prefixed: true}
 		case 0x8:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 1}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 1, Prefixed: true}
 		case 0x9:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 3}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 3, Prefixed: true}
 		case 0xA:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 5}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 5, Prefixed: true}
 		case 0xB:
-			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 7}
+			return Instruction{Op: "RES", DataType: NODATA, To: r, From: r, Bit: 7, Prefixed: true}
 		case 0xC:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 1}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 1, Prefixed: true}
 		case 0xD:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 3}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 3, Prefixed: true}
 		case 0xE:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 5}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 5, Prefixed: true}
 		case 0xF:
-			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 7}
+			return Instruction{Op: "SET", DataType: NODATA, To: r, From: r, Bit: 7, Prefixed: true}
 		}
 	}
 	return Instruction{}

@@ -13,9 +13,10 @@ type Clock struct {
 	TAC     byte
 	prevAND byte
 
-	sysClock uint
+	sysClock uint // main clock for m-cycle timing, untouchable for game code, unlike DIV
 
-	TIMAState timaState
+	TIMAState        timaState
+	ticksToTimerLoad int
 }
 
 type timaState int
@@ -41,8 +42,19 @@ var divBit = []int{
 	7, // 16384 Hz
 }
 
+func (c *Clock) Cycle() {
+	c.Tick()
+
+	c.UpdateTIMAState()
+	c.IncrementTIMA()
+	// TODO don't tick if STOPped
+	// if c.sysClock%4 == 0 {
+	// }
+
+}
+
 func (c *Clock) Tick() {
-	c.sysClock++
+	// c.sysClock++
 	c.DIV++
 }
 
@@ -51,9 +63,14 @@ func (c *Clock) UpdateTIMAState() {
 	case TIMA_RELOADED:
 		c.TIMAState = TIMA_NO_OVERFLOW
 	case TIMA_DELAYING:
-		c.TIMA = c.TMA
-		c.bus.InterruptRequest(TIMER_INTR)
-		c.TIMAState = TIMA_RELOADED
+		c.ticksToTimerLoad--
+		if c.ticksToTimerLoad == 0 {
+			c.TIMA = c.TMA
+			c.bus.InterruptRequest(TIMER_INTR)
+			c.TIMAState = TIMA_RELOADED
+		}
+		// default:
+		//   c.IncrementTIMA()
 	}
 
 }
@@ -67,6 +84,8 @@ func (c *Clock) IncrementTIMA() {
 	if curAND == 0 && c.prevAND == 1 {
 		c.TIMA++
 		if c.TIMA == 0x00 {
+			// c.TIMA = c.TMA
+			c.ticksToTimerLoad = 4
 			c.TIMAState = TIMA_DELAYING
 		}
 	}

@@ -81,7 +81,7 @@ func (j *Joypad) Read() byte {
 		// Buttons
 		ret = (ret & 0xF0) | (j.Buttons & 0xF)
 	}
-	return ret
+	return ret | 0xC0 // bits 6 and 7 always return 1
 }
 
 func (j *Joypad) Write(data byte) {

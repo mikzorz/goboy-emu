@@ -55,6 +55,8 @@ func (p *PPU) Cycle() {
 		if p.dot == 0 {
 			if p.LY == p.LYC {
 				p.STAT |= 0b100
+			} else {
+				p.STAT &= 0xFB
 			}
 
 			p.oldConditionState = 0
@@ -119,7 +121,7 @@ func (p *PPU) Read(addr uint16) byte {
 	if addr >= 0x8000 && addr <= 0x9FFF && p.mode != MODE_DRAWING {
 		return p.vram[addr-0x8000]
 	} else if addr >= 0xFE00 && addr <= 0xFE9F && (p.mode == MODE_HBLANK || p.mode == MODE_VBLANK) {
-    return p.bus.dma.Read(addr)
+		return p.bus.dma.Read(addr)
 	} else if addr >= 0xFE00 && addr <= 0xFEFF && p.mode == MODE_OAMSCAN {
 		// OAM Corruption Bug
 		// If PPU is in mode 2, r/w to FE00-FEFF cause rubbish data (except for FE00 and FE04)
@@ -151,15 +153,20 @@ func (p *PPU) setMode() {
 	if p.LY < 144 {
 		if p.dot == 0 {
 			p.mode = MODE_OAMSCAN
+			p.STAT = (p.STAT & 0xFC) | 0x02
+
 			p.savedObjects = []byte{}
 			p.oamScanI = 0
 			p.STATInterrupt()
 		} else if p.dot == 80 {
 			p.mode = MODE_DRAWING
+			p.STAT = (p.STAT & 0xFC) | 0x03
 			p.bus.lcd.SetPixelsToDiscard(p.SCX % 8)
-			// TODO: May need to sort objects from left-most x
-		} else if p.x >= 32 && p.mode != MODE_HBLANK {
+			// } else if p.x >= 32 && p.mode != MODE_HBLANK {
+			// } else if p.x >= 21 && p.mode != MODE_HBLANK {
+		} else if int32(p.bus.lcd.GetX()) >= TRUEWIDTH && p.mode != MODE_HBLANK { // breaks graphics, for some reason
 			p.mode = MODE_HBLANK
+			p.STAT = (p.STAT & 0xFC)
 
 			p.bgFIFO.Clear()
 			p.objFIFO.Clear()
@@ -173,6 +180,7 @@ func (p *PPU) setMode() {
 	} else {
 		if p.mode != MODE_VBLANK {
 			p.mode = MODE_VBLANK
+			p.STAT = (p.STAT & 0xFC) | 0x01
 			p.STATInterrupt()
 			p.bus.InterruptRequest(VBLANK_INTR)
 		}
@@ -181,22 +189,23 @@ func (p *PPU) setMode() {
 }
 
 func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
-	// when y = 0, sprite is 16 pixels above top of screen
-	y := p.bus.dma.oam[p.oamScanI]
+	y := p.bus.dma.oam[oamIndex]
 
 	spriteSize := byte(8)
 	if utils.GetBit(2, p.LCDC) == 1 {
 		spriteSize = 16
 	}
 
-	spriteTop := y - 16
-	spriteBottom := spriteTop + spriteSize
-
-	if scanline >= spriteTop && scanline < spriteBottom {
-		// sprite crosses over line
+	objLine := p.objectRowOnScanline(y, scanline, p.SCY)
+	if objLine >= 0 && objLine < spriteSize {
 		return true
 	}
+
 	return false
+}
+
+func (p *PPU) objectRowOnScanline(objY, scanline, scroll byte) byte {
+	return 16 + scanline + scroll - objY
 }
 
 func (p *PPU) saveObjectIndex(idx byte) {
@@ -211,7 +220,7 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 	if len(p.savedObjects) > 0 {
 		index := p.savedObjects[0]
 		objX := p.bus.dma.oam[index+1]
-		if objX >= (p.x+1)*8 && objX < (p.x+2)*8 {
+		if objX >= (p.x)*8 && objX < (p.x+1)*8 {
 			p.savedObjects = p.savedObjects[1:]
 			return index, true
 		}
@@ -224,13 +233,13 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 func (p *PPU) objectFetcherCycle() {
 	switch p.fetchStep {
 	case 0:
-		// Get tile id from oam[i + 2]
 		p.tileID = p.bus.dma.oam[p.objectToFetch+2]
 
 		// Check if LCDC bit 2 is set AND check if currently getting top or bottom tile
 		if utils.IsBitSet(2, p.LCDC) {
-			yDiff := p.LY + 16 - (p.bus.dma.oam[p.objectToFetch])
-			if yDiff < 8 {
+			y := (p.bus.dma.oam[p.objectToFetch])
+			row := p.objectRowOnScanline(y, p.LY, p.SCY)
+			if row < 8 {
 				// Top tile
 				p.tileID &= 0xFE
 			} else {
@@ -242,11 +251,15 @@ func (p *PPU) objectFetcherCycle() {
 		p.fetchStep++
 	case 1:
 		// get lo
-		p.tileLow = p.fetchTileDataLow(p.tileID, p.LY, true)
+		// TODO: Y-flip
+		y := (p.bus.dma.oam[p.objectToFetch])
+		p.tileLow = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), false, true)
 		p.fetchStep++
 	case 2:
 		// get hi
-		p.tileHigh = p.fetchTileDataHigh(p.tileID, p.LY, true)
+		// TODO: Y-flip
+		y := (p.bus.dma.oam[p.objectToFetch])
+		p.tileHigh = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), true, true)
 		p.fetchStep++
 	case 3:
 		// push to sprite fifo
@@ -256,7 +269,13 @@ func (p *PPU) objectFetcherCycle() {
 			// X-Flip
 			slices.Reverse(pixelData)
 		}
-		pixelData = pixelData[len(*p.objFIFO):] // Discard pixels, may also need to adjust for pixel x
+
+		if x := p.bus.dma.oam[p.objectToFetch+1]; x < 8 {
+			pixToTrim := 8 - x
+			pixelData = pixelData[pixToTrim:]
+		}
+		pixelData = pixelData[len(*p.objFIFO):] // Pixels already in FIFO take priority.
+
 		p.objFIFO.Push(pixelData)
 		p.fetchStep = 0
 		p.fetchingObject = false
@@ -267,16 +286,15 @@ func (p *PPU) bgFetcherCycle() {
 	switch p.fetchStep {
 	case 0:
 		// Fetch tile id from map
-		x, y := p.x, p.LY
-		p.tileID = p.getTileIDFromMap(x, y)
+		p.tileID = p.getTileIDFromMap(p.x, p.LY)
 		p.fetchStep++
 	case 1:
 		// Fetch tile row low
-		p.tileLow = p.fetchTileDataLow(p.tileID, p.LY, false)
+		p.tileLow = p.fetchTileData(p.tileID, p.LY+p.SCY, false, false)
 		p.fetchStep++
 	case 2:
 		// Fetch tile row high
-		p.tileHigh = p.fetchTileDataHigh(p.tileID, p.LY, false)
+		p.tileHigh = p.fetchTileData(p.tileID, p.LY+p.SCY, true, false)
 		// Push background pixels here (according to pandocs)
 		// But according to GBEDG, the first time the background fetcher reaches this step per scanline, it resets.
 		if !p.fetcherReset {
@@ -298,36 +316,44 @@ func (p *PPU) bgFetcherCycle() {
 // Given x (0-31) and y (0-255) coordinates, find the corresponding map tile and return its value.
 func (p *PPU) getTileIDFromMap(x, y byte) byte {
 	mapAddr := uint16(0x1800)
+
+	// if utils.IsBitSet(5, p.LCDC) {
+	//   // window tiles
+	//   if utils.GetBit(6, p.LCDC) == 1 {
+	//     mapAddr += 0x400
+	//   }
+	// } else {
+	// bg tile
 	if utils.GetBit(3, p.LCDC) == 1 {
 		mapAddr += 0x400
 	}
-	tilex := (x + (p.SCX / 8)) & 0x1F
-	// tiley := ((y / 8) + (p.SCY / 8))
-	tiley := ((y  + p.SCY) / 8)
+	tilex, tiley := p.getTileCoords(x*8, y, p.SCX, p.SCY)
+	// }
 	offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
 	return p.vram[mapAddr+offset]
 }
 
-func (p *PPU) fetchTileDataLow(id, y byte, objectTile bool) byte {
-	baseAddr := uint16(0x0000)
-	if utils.GetBit(4, p.LCDC) == 0 && id < 128 && !objectTile {
-		// Only for BG/Window, not OAM
-		baseAddr += 0x1000
-	}
-	tileAddrOffset := uint16(id) * 16        // 16 bytes per tile
-	tileRowOffset := uint16((y+p.SCY)%8) * 2 // 2 bytes per row
-	return p.vram[baseAddr+tileAddrOffset+tileRowOffset]
+// Given pixel coordinates x and y, and pixel offsets scx and scy, return the tile's x and y coordinates.
+func (p *PPU) getTileCoords(x, y, scx, scy byte) (tx, ty byte) {
+	tx = ((x + scx) / 8)
+	ty = ((y + scy) / 8)
+	return
 }
 
-func (p *PPU) fetchTileDataHigh(id, y byte, objectTile bool) byte {
+func (p *PPU) fetchTileData(id, y byte, hi, objectTile bool) byte {
 	baseAddr := uint16(0x0000)
 	if utils.GetBit(4, p.LCDC) == 0 && id < 128 && !objectTile {
 		// Only for BG/Window, not OAM
 		baseAddr += 0x1000
 	}
-	tileAddrOffset := uint16(id) * 16        // 16 bytes per tile
-	tileRowOffset := uint16((y+p.SCY)%8) * 2 // 2 bytes per row
-	return p.vram[baseAddr+tileAddrOffset+tileRowOffset+1]
+	tileAddrOffset := uint16(id) * 16  // 16 bytes per tile
+	tileRowOffset := uint16((y)%8) * 2 // 2 bytes per row
+
+	tileDataAddr := baseAddr + tileAddrOffset + tileRowOffset
+	if hi {
+		tileDataAddr++
+	}
+	return p.vram[tileDataAddr]
 }
 
 func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
@@ -335,7 +361,6 @@ func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
 	for bit := 7; bit >= 0; bit-- {
 		colour := (utils.GetBit(bit, hi) << 1) | utils.GetBit(bit, lo)
 		data = append(data, Pixel{c: colour})
-		// pal :=
 	}
 	return data
 }
