@@ -3,7 +3,6 @@ package main
 import (
 	// "log"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
-	"slices"
 	"sort"
 )
 
@@ -18,6 +17,8 @@ type PPU struct {
 	dot                                                    int    // current dot of scanline
 	oamScanI                                               byte   // index of OAM to scan
 	savedObjects                                           []byte // object' oam indices, for objects on current scanline
+  objFetcher ObjFetcher
+  bgFetcher BGFetcher
 	fetchingObject                                         bool   // currently fetching object pixel data
 	objectToFetch                                          byte   // oam index of object to be fetched
 	fetchStep                                              int
@@ -36,17 +37,21 @@ const (
 )
 
 func NewPPU() *PPU {
-	return &PPU{
+  ppu :=  &PPU{
 		vram: [0x2000]byte{},
+    objFetcher: ObjFetcher{},
+    bgFetcher: BGFetcher{},
 		LCDC: 0x91,
 		BGP:  0xFC,
 		OBP0: 0xFF,
 		OBP1: 0xFF,
 	}
-}
 
-// I think the VRAM should be external to the PPU, and the OAM DMA should have direct access to it.
-// OAM also external to DMA.
+  // ppu.objFetcher.p = ppu
+  // ppu.bgFetcher.p = ppu
+
+  return ppu
+}
 
 func (p *PPU) Cycle() {
 	// if LCD/PPU are enabled
@@ -68,40 +73,29 @@ func (p *PPU) Cycle() {
 		switch p.mode {
 		case MODE_OAMSCAN:
 			// OAM Scan
-			if len(p.savedObjects) < 10 && p.objectOnScanline(p.oamScanI, p.LY) {
-				p.saveObjectIndex(p.oamScanI)
-			}
-			p.oamScanI += 4
+      if p.bus.clock.sysClock % 2 == 0 {
+        if len(p.savedObjects) < 10 && p.objectOnScanline(p.oamScanI, p.LY) {
+          p.saveObjectIndex(p.oamScanI)
+        }
+        p.oamScanI += 4
+      }
 		case MODE_DRAWING:
 			// Drawing to LCD
-			// TODO: push pixels to FIFO, not LCD
-			// For now, assumes that all tiles are background tiles.
 			// TODO
 			// Window.
-			// Then objects.
+      // Fix object y scrolling/position)
 
-			// If there is a sprite at the current x position, reset background fetcher and pause it
-			// Pause the FIFO -> LCD pixel shifter
-			if i, ok := p.objectAtCurrentX(); ok && !p.fetchingObject {
-				p.fetchStep = 0
-				p.fetchingObject = true
-				p.objectToFetch = i
-			}
-
-			if p.fetchingObject {
-				p.objectFetcherCycle()
-			} else {
-				p.bgFetcherCycle()
-			}
+      p.objFetcher.Cycle(p)
+      p.bgFetcher.Cycle(p)
 		case MODE_HBLANK:
 			// H-Blank
 		case MODE_VBLANK:
 			// V-Blank
 		}
 
-		// for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
+    // TODO: for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
 
-		p.dot += 2
+		p.dot++
 
 		if p.dot >= 456 {
 			p.dot = 0
@@ -162,9 +156,7 @@ func (p *PPU) setMode() {
 			p.mode = MODE_DRAWING
 			p.STAT = (p.STAT & 0xFC) | 0x03
 			p.bus.lcd.SetPixelsToDiscard(p.SCX % 8)
-			// } else if p.x >= 32 && p.mode != MODE_HBLANK {
-			// } else if p.x >= 21 && p.mode != MODE_HBLANK {
-		} else if int32(p.bus.lcd.GetX()) >= TRUEWIDTH && p.mode != MODE_HBLANK { // breaks graphics, for some reason
+		} else if int32(p.bus.lcd.GetX()) >= TRUEWIDTH && p.mode != MODE_HBLANK {
 			p.mode = MODE_HBLANK
 			p.STAT = (p.STAT & 0xFC)
 
@@ -190,6 +182,11 @@ func (p *PPU) setMode() {
 
 func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 	y := p.bus.dma.oam[oamIndex]
+	x := p.bus.dma.oam[oamIndex+1]
+
+  if x == 0 {
+    return false
+  }
 
 	spriteSize := byte(8)
 	if utils.GetBit(2, p.LCDC) == 1 {
@@ -204,12 +201,14 @@ func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 	return false
 }
 
+// Returns the row number of an object that is on the current scanline
 func (p *PPU) objectRowOnScanline(objY, scanline, scroll byte) byte {
 	return 16 + scanline + scroll - objY
 }
 
 func (p *PPU) saveObjectIndex(idx byte) {
 	p.savedObjects = append(p.savedObjects, idx)
+  // Sort objects from lowest x to highest
 	sort.Slice(p.savedObjects, func(i, j int) bool {
 		return p.bus.dma.oam[p.savedObjects[i]+1] < p.bus.dma.oam[p.savedObjects[j]+1]
 	})
@@ -220,7 +219,7 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 	if len(p.savedObjects) > 0 {
 		index := p.savedObjects[0]
 		objX := p.bus.dma.oam[index+1]
-		if objX >= (p.x)*8 && objX < (p.x+1)*8 {
+    if objX <= p.bus.lcd.GetX() + 8 {
 			p.savedObjects = p.savedObjects[1:]
 			return index, true
 		}
@@ -230,88 +229,6 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 
 }
 
-func (p *PPU) objectFetcherCycle() {
-	switch p.fetchStep {
-	case 0:
-		p.tileID = p.bus.dma.oam[p.objectToFetch+2]
-
-		// Check if LCDC bit 2 is set AND check if currently getting top or bottom tile
-		if utils.IsBitSet(2, p.LCDC) {
-			y := (p.bus.dma.oam[p.objectToFetch])
-			row := p.objectRowOnScanline(y, p.LY, p.SCY)
-			if row < 8 {
-				// Top tile
-				p.tileID &= 0xFE
-			} else {
-				// Bottom tile
-				p.tileID |= 0x01
-			}
-		}
-
-		p.fetchStep++
-	case 1:
-		// get lo
-		// TODO: Y-flip
-		y := (p.bus.dma.oam[p.objectToFetch])
-		p.tileLow = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), false, true)
-		p.fetchStep++
-	case 2:
-		// get hi
-		// TODO: Y-flip
-		y := (p.bus.dma.oam[p.objectToFetch])
-		p.tileHigh = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), true, true)
-		p.fetchStep++
-	case 3:
-		// push to sprite fifo
-		pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
-		attr := p.bus.dma.oam[p.objectToFetch+3]
-		if utils.IsBitSet(5, attr) {
-			// X-Flip
-			slices.Reverse(pixelData)
-		}
-
-		if x := p.bus.dma.oam[p.objectToFetch+1]; x < 8 {
-			pixToTrim := 8 - x
-			pixelData = pixelData[pixToTrim:]
-		}
-		pixelData = pixelData[len(*p.objFIFO):] // Pixels already in FIFO take priority.
-
-		p.objFIFO.Push(pixelData)
-		p.fetchStep = 0
-		p.fetchingObject = false
-	}
-}
-
-func (p *PPU) bgFetcherCycle() {
-	switch p.fetchStep {
-	case 0:
-		// Fetch tile id from map
-		p.tileID = p.getTileIDFromMap(p.x, p.LY)
-		p.fetchStep++
-	case 1:
-		// Fetch tile row low
-		p.tileLow = p.fetchTileData(p.tileID, p.LY+p.SCY, false, false)
-		p.fetchStep++
-	case 2:
-		// Fetch tile row high
-		p.tileHigh = p.fetchTileData(p.tileID, p.LY+p.SCY, true, false)
-		// Push background pixels here (according to pandocs)
-		// But according to GBEDG, the first time the background fetcher reaches this step per scanline, it resets.
-		if !p.fetcherReset {
-			p.fetchStep = 0
-			p.fetcherReset = true
-		} else {
-			p.fetchStep++
-		}
-	case 3:
-		if p.bgFIFO.CanPushBG() {
-			pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
-			p.bgFIFO.Push(pixelData)
-			p.fetchStep = 0
-			p.x++
-		}
-	}
-}
 
 // Given x (0-31) and y (0-255) coordinates, find the corresponding map tile and return its value.
 func (p *PPU) getTileIDFromMap(x, y byte) byte {

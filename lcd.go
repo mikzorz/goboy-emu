@@ -47,6 +47,8 @@ func NewLCD() *LCD {
 
 // when lcdc bit 0 is cleared, screen becomes blank white. window and sprites may still be displayed depending on bits 1 and 5.
 
+// lcd doesn't show image until frame after it is turned on.
+
 func (l *LCD) Cycle() {
 	if utils.IsBitSet(7, l.bus.ppu.LCDC) {
 

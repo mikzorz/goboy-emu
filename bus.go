@@ -85,9 +85,8 @@ func (b *Bus) Cycle() {
 		b.cpu.Cycle()
 		b.dma.Cycle()
 	}
-	if b.clock.sysClock%2 == 0 {
-		b.ppu.Cycle()
-	}
+
+	b.ppu.Cycle()
 
 	b.lcd.Cycle()
 

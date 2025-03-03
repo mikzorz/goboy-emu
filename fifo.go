@@ -26,10 +26,20 @@ func (f FIFO) CanPushBG() bool {
 	return false
 }
 
+// Push new pixels to the object FIFO.
+// If new pixels are pushed to a non-empty FIFO, every pixel up to Len() in the FIFO is kept.
+// Only the pixels after, and including, Len() are added from the new pixels.
+// e.g. If there are 5 pixels in the FIFO, but the last 2 are transparent, and a new 8 pixels are pushed, then only the last 5 of the new pixels are added to the FIFO.
+func (f *FIFO) PushObject(data []Pixel) {
+  l := f.Len()
+
+  data = data[l:]
+  *f = (*f)[:l]
+  *f = append(*f, data...)
+}
+
 func (f *FIFO) Push(data []Pixel) {
-	for _, p := range data {
-		*f = append(*f, p)
-	}
+  *f = data
 }
 
 func (f FIFO) CanPop() bool {
@@ -47,4 +57,18 @@ func (f *FIFO) Pop() Pixel {
 
 func (f *FIFO) Clear() {
 	*f = *NewFIFO()
+}
+
+// Returns the number of pixels up to and including the last non-transparent pixel.
+// Object FIFO only.
+func (f *FIFO) Len() int {
+  length := len(*f)
+  for i := len(*f) - 1; i >= 0; i-- {
+    if (*f)[i].c == 0 {
+      length--
+    } else {
+      break
+    }
+  }
+  return length
 }
