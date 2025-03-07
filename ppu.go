@@ -182,11 +182,14 @@ func (p *PPU) setMode() {
 
 func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 	y := p.bus.dma.oam[oamIndex]
-	x := p.bus.dma.oam[oamIndex+1]
+	// x := p.bus.dma.oam[oamIndex+1]
 
-  if x == 0 {
-    return false
-  }
+  // According to gbdev, an object with x = 0 still counts towards the 10 object limit.
+  // GBEDG says that x must be greater than 0.
+  // TODO: confirm
+  // if x == 0 {
+  //   return false
+  // }
 
 	spriteSize := byte(8)
 	if utils.GetBit(2, p.LCDC) == 1 {
@@ -203,7 +206,7 @@ func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 
 // Returns the row number of an object that is on the current scanline
 func (p *PPU) objectRowOnScanline(objY, scanline, scroll byte) byte {
-	return 16 + scanline + scroll - objY
+	return 16 + scanline  - objY
 }
 
 func (p *PPU) saveObjectIndex(idx byte) {

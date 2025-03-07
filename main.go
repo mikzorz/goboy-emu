@@ -22,7 +22,11 @@ var enableDebugInfo bool
 
 // Big TODO List
 
-// - Pass more tests
+// - Draw window
+// - Fix screen tearing (very noticable in Zelda when camera moves to left and right)
+// - Fix top row(s)
+
+// - Pass more tests (need to fix timing differences)
 
 // - When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
 //    End of test is JR to itself, causing infinite loop
