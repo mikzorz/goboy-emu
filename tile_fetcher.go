@@ -32,7 +32,7 @@ func (f *ObjFetcher) Cycle(p *PPU) {
 
 func (f *ObjFetcher) Step(p *PPU) {
 	switch p.fetchStep {
-	case 0:
+	case 1:
 		p.tileID = p.bus.dma.oam[p.objectToFetch+2]
 
     // If LCDC.2 is set, sprites size = 8x16, else 8x8
@@ -48,20 +48,17 @@ func (f *ObjFetcher) Step(p *PPU) {
 			}
 		}
 
-		p.fetchStep++
-	case 2:
+	case 3:
 		// get lo
 		// TODO: Y-flip
 		y := (p.bus.dma.oam[p.objectToFetch])
 		p.tileLow = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), false, true)
-		p.fetchStep++
-	case 4:
+	case 5:
 		// get hi
 		// TODO: Y-flip
 		y := (p.bus.dma.oam[p.objectToFetch])
 		p.tileHigh = p.fetchTileData(p.tileID, p.objectRowOnScanline(y, p.LY, p.SCY), true, true)
-		p.fetchStep++
-	case 6:
+	case 7:
 		// push to sprite fifo
 		pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
 		objFlags := p.bus.dma.oam[p.objectToFetch+3]
@@ -84,11 +81,12 @@ func (f *ObjFetcher) Step(p *PPU) {
     }
 
 		p.objFIFO.PushObject(pixelData)
-		p.fetchStep = 0
+
 		p.fetchingObject = false
-  default:
-    p.fetchStep++
+		p.fetchStep = 0
+    return
 	}
+  p.fetchStep++
 }
 
 type BGFetcher struct {
@@ -103,32 +101,43 @@ func (f *BGFetcher) Cycle(p *PPU) {
 
 func (f *BGFetcher) Step(p *PPU) {
 	switch p.fetchStep {
-	case 0:
+	case 1:
 		// Fetch tile id from map
-		p.tileID = p.getTileIDFromMap(p.x, p.LY)
-		p.fetchStep++
-	case 2:
+    if p.fetchingWindow {
+      p.tileID = p.getWindowIDFromMap(p.x , p.windowLineCounter)
+    } else {
+  		p.tileID = p.getTileIDFromMap(p.x, p.LY)
+    }
+	case 3:
 		// Fetch tile row low
-		p.tileLow = p.fetchTileData(p.tileID, p.LY+p.SCY, false, false)
-		p.fetchStep++
-	case 4:
+    if p.fetchingWindow {
+  		p.tileLow = p.fetchTileData(p.tileID, p.windowLineCounter, false, false)
+    } else {
+  		p.tileLow = p.fetchTileData(p.tileID, p.LY+p.SCY, false, false)
+    }
+	case 5:
 		// Fetch tile row high
-		p.tileHigh = p.fetchTileData(p.tileID, p.LY+p.SCY, true, false)
+    if p.fetchingWindow {
+  		p.tileHigh = p.fetchTileData(p.tileID, p.windowLineCounter, true, false)
+    } else {
+		  p.tileHigh = p.fetchTileData(p.tileID, p.LY+p.SCY, true, false)
+    }
     // Reset fetcher after first fetch of each scanline, as per GBEDG
 		if !p.fetcherReset {
+		  p.x = 0
 			p.fetchStep = 0
 			p.fetcherReset = true
-		} else {
-			p.fetchStep++
-		}
-	case 6:
+      return
+		}	
+  case 7:
 		if p.bgFIFO.CanPushBG() {
-			pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
-			p.bgFIFO.Push(pixelData)
-			p.fetchStep = 0
-			p.x++
-		}
-  default:
-    p.fetchStep++
+      pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
+      p.bgFIFO.Push(pixelData)
+      p.x+=8
+      p.fetchStep = 0
+    }
+    return
 	}
+
+  p.fetchStep++
 }

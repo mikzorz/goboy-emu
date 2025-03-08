@@ -1,6 +1,7 @@
 package main
 
 import (
+  // "fmt"
 	// "log"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"sort"
@@ -25,6 +26,10 @@ type PPU struct {
 	fetcherReset                                           bool // for reseting background fetcher at beginning of each scanline
 	tileID, tileLow, tileHigh                              byte
 	oldConditionState                                      byte
+  windowLineCounter byte
+  windowReached bool
+  belowWindowTop bool
+  fetchingWindow bool
 }
 
 type ppuMode string
@@ -46,9 +51,6 @@ func NewPPU() *PPU {
 		OBP0: 0xFF,
 		OBP1: 0xFF,
 	}
-
-  // ppu.objFetcher.p = ppu
-  // ppu.bgFetcher.p = ppu
 
   return ppu
 }
@@ -82,11 +84,13 @@ func (p *PPU) Cycle() {
 		case MODE_DRAWING:
 			// Drawing to LCD
 			// TODO
-			// Window.
-      // Fix object y scrolling/position)
+			// Window
 
       p.objFetcher.Cycle(p)
       p.bgFetcher.Cycle(p)
+
+      p.checkIfWindowReached()
+
 		case MODE_HBLANK:
 			// H-Blank
 		case MODE_VBLANK:
@@ -149,6 +153,11 @@ func (p *PPU) setMode() {
 			p.mode = MODE_OAMSCAN
 			p.STAT = (p.STAT & 0xFC) | 0x02
 
+      p.windowReached = false
+      if p.WY == p.LY {
+        p.belowWindowTop = true
+      }
+
 			p.savedObjects = []byte{}
 			p.oamScanI = 0
 			p.STATInterrupt()
@@ -166,12 +175,17 @@ func (p *PPU) setMode() {
 			p.fetcherReset = false
 			p.x = 0
 			p.bus.lcd.SetX(0)
+      if p.windowReached {
+        p.windowLineCounter++
+      }
 
 			p.STATInterrupt()
 		}
 	} else {
 		if p.mode != MODE_VBLANK {
 			p.mode = MODE_VBLANK
+      p.belowWindowTop = false
+      p.windowLineCounter = 0
 			p.STAT = (p.STAT & 0xFC) | 0x01
 			p.STATInterrupt()
 			p.bus.InterruptRequest(VBLANK_INTR)
@@ -236,19 +250,26 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 // Given x (0-31) and y (0-255) coordinates, find the corresponding map tile and return its value.
 func (p *PPU) getTileIDFromMap(x, y byte) byte {
 	mapAddr := uint16(0x1800)
+  var tilex, tiley byte
 
-	// if utils.IsBitSet(5, p.LCDC) {
-	//   // window tiles
-	//   if utils.GetBit(6, p.LCDC) == 1 {
-	//     mapAddr += 0x400
-	//   }
-	// } else {
-	// bg tile
-	if utils.GetBit(3, p.LCDC) == 1 {
-		mapAddr += 0x400
-	}
-	tilex, tiley := p.getTileCoords(x*8, y, p.SCX, p.SCY)
-	// }
+    // bg tile
+    if utils.GetBit(3, p.LCDC) == 1 {
+      mapAddr += 0x400
+    }
+  	tilex, tiley = p.getTileCoords(x, y, p.SCX, p.SCY)
+	offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
+	return p.vram[mapAddr+offset]
+}
+
+func (p *PPU) getWindowIDFromMap(x, y byte) byte {
+	mapAddr := uint16(0x1800)
+  var tilex, tiley byte
+
+	  // window tile
+	  if utils.GetBit(6, p.LCDC) == 1 {
+	    mapAddr += 0x400
+	  }
+    tilex, tiley = p.getTileCoords(x, y, 0, 0)
 	offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
 	return p.vram[mapAddr+offset]
 }
@@ -283,6 +304,22 @@ func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
 		data = append(data, Pixel{c: colour})
 	}
 	return data
+}
+
+func (p *PPU) checkIfWindowReached() {
+
+  if utils.IsBitSet(5, p.LCDC) && p.belowWindowTop && p.x+7 >= p.WX {
+    p.fetchingWindow = true
+
+    if !p.windowReached {
+      p.windowReached = true
+      p.x = 0
+      p.bgFIFO.Clear()
+      p.fetchStep = 0
+    }
+  } else {
+    p.fetchingWindow = false
+  }
 }
 
 // If condition is met when no conditions were met before, trigger STAT interrupt

@@ -45,47 +45,25 @@ func NewLCD() *LCD {
 	return &LCD{}
 }
 
-// when lcdc bit 0 is cleared, screen becomes blank white. window and sprites may still be displayed depending on bits 1 and 5.
-
 // lcd doesn't show image until frame after it is turned on.
+// when lcdc.7 is disabled, do values get reset? will that fix the glitchy top row pixels?
 
 func (l *LCD) Cycle() {
 	if utils.IsBitSet(7, l.bus.ppu.LCDC) {
 
-		// log.Printf("PPU Mode: %s, len(bgFIFO): %d", l.bus.ppu.mode, len(*l.bgFIFO))
+    // TODO: don't check if ppu mode == DRAWING, when final pixels are pushed to FIFO, ppu should be able to switch to HBLANK while the LCD keeps drawing
 		if l.bus.ppu.mode == MODE_DRAWING && int32(l.x) < TRUEWIDTH && l.bgFIFO.CanPop() && !l.bus.ppu.fetchingObject {
+      // Always pop a bg pixel, only pop obj pixel if one exists
 			bgPix := l.bgFIFO.Pop()
 			objPix := Pixel{}
-			if l.objFIFO.CanPop() { // Rename CanPopBG
+			if l.objFIFO.CanPop() { 
 				objPix = l.objFIFO.Pop()
 			}
 
 			if l.pixelsToDiscard > 0 {
 				l.pixelsToDiscard--
 			} else {
-
-				pix := Pixel{}
-				var palAddr uint16
-
-				if !utils.IsBitSet(0, l.bus.ppu.LCDC) {
-					bgPix.c = 0
-				}
-
-				if !utils.IsBitSet(1, l.bus.ppu.LCDC) {
-					objPix.c = 0
-				}
-
-				if (objPix.bgPriority == 1 && bgPix.c != 0) || objPix.c == 0 {
-					pix.c = bgPix.c
-					palAddr = 0xFF47
-				} else {
-					pix.c = objPix.c
-					palAddr = 0xFF48 + uint16(objPix.pal)
-				}
-
-				paletteIdx := (pix.c * 2)
-				pal := bus.Read(palAddr)
-				c := colours[(pal>>paletteIdx)&0x3]
+        c := l.GetPixelColour(bgPix, objPix)
 
 				// Draw from top-left
 				if !l.bus.screenDisabled {
@@ -97,6 +75,39 @@ func (l *LCD) Cycle() {
 		}
 	}
 }
+
+func (l *LCD) GetPixelColour(bgPix, objPix Pixel) color.RGBA {
+  pix := Pixel{}
+  var palAddr uint16
+
+  bgWinEnabled := utils.IsBitSet(0, l.bus.ppu.LCDC)
+  objEnabled := utils.IsBitSet(1, l.bus.ppu.LCDC)
+
+  if !objEnabled {
+    objPix.c = 0
+  }
+
+  if !bgWinEnabled {
+    // if bg/window is disabled and object is either transparent or disabled, draw a white pixel
+    if objPix.c == 0 {
+      return colours[0]
+    }
+    bgPix.c = 0
+  }
+
+  if (objPix.bgPriority == 1 && bgPix.c != 0) || objPix.c == 0 {
+    pix.c = bgPix.c
+    palAddr = 0xFF47
+  } else {
+    pix.c = objPix.c
+    palAddr = 0xFF48 + uint16(objPix.pal)
+  }
+
+  paletteIdx := (pix.c * 2)
+  pal := bus.Read(palAddr)
+  return colours[(pal>>paletteIdx)&0x3]
+}
+
 
 func (l *LCD) SetBus(b *Bus) {
 	l.bus = b

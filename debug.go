@@ -141,9 +141,11 @@ func drawDebugInfo() {
 	drawRegister(bus.lcd.GetX(), "lcd x", 0, 8)
 	drawRegister(bus.ppu.SCX, "SCX", 0, 9)
 	drawRegister(bus.ppu.SCY, "SCY", 0, 10)
-	drawRegister(string(bus.ppu.mode), "Mode", 0, 11)
-	drawRegister(bus.dma.oamDMA, "DMA", 0, 12)
-	drawRegister(utils.GetBit(7, bus.ppu.LCDC), "LCD On", 0, 13)
+	drawRegister(bus.ppu.WX, "WX", 0, 11)
+	drawRegister(bus.ppu.WY, "WY", 0, 12)
+	drawRegister(string(bus.ppu.mode), "Mode", 0, 13)
+	drawRegister(bus.dma.oamDMA, "DMA", 0, 14)
+	drawRegister(utils.GetBit(7, bus.ppu.LCDC), "LCD On", 0, 15)
 
 	rl.DrawTextEx(debugFont, "<-, -> Change Speed, ^, v Scroll Ram, [Space] Pause/Unpause, [A] 1 M-Cycle, [S] 1 Op, [D] 100 Ops, [M] Toggle Mem/Screen, [LCtrl] Toggle Debugger", rl.Vector2{float32(5), float32(window.h - 5 - int32(fontSize))}, float32(fontSize), 0, rl.Blue)
 }
