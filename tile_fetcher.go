@@ -64,8 +64,8 @@ func (f *ObjFetcher) Step(p *PPU) {
 	case 6:
 		// push to sprite fifo
 		pixelData := p.mergeTileBytes(p.tileHigh, p.tileLow)
-		attr := p.bus.dma.oam[p.objectToFetch+3]
-		if utils.IsBitSet(5, attr) {
+		objFlags := p.bus.dma.oam[p.objectToFetch+3]
+		if utils.IsBitSet(5, objFlags) {
 			// X-Flip
 			slices.Reverse(pixelData)
 		}
@@ -76,8 +76,8 @@ func (f *ObjFetcher) Step(p *PPU) {
 			pixelData = pixelData[pixToTrim:]
 		}
 
-    bgPriority := utils.GetBit(7, attr)
-    pal := utils.GetBit(4, attr)
+    bgPriority := utils.GetBit(7, objFlags)
+    pal := utils.GetBit(4, objFlags)
     for i, _ := range pixelData {
       pixelData[i].pal = pal
       pixelData[i].bgPriority = bgPriority
