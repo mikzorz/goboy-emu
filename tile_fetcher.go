@@ -76,6 +76,13 @@ func (f *ObjFetcher) Step(p *PPU) {
 			pixelData = pixelData[pixToTrim:]
 		}
 
+    bgPriority := utils.GetBit(7, attr)
+    pal := utils.GetBit(4, attr)
+    for i, _ := range pixelData {
+      pixelData[i].pal = pal
+      pixelData[i].bgPriority = bgPriority
+    }
+
 		p.objFIFO.PushObject(pixelData)
 		p.fetchStep = 0
 		p.fetchingObject = false
