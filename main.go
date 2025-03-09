@@ -36,7 +36,6 @@ var enableDebugInfo bool
 // - When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
 //    End of test is JR to itself, causing infinite loop
 
-
 // - My implementation of a bus is completely wrong for a gameboy. The gameboy has 2(?) main buses, 1 goes to vram via ppu? Buses do not have clocks.
 
 // - Finish setting default values
@@ -157,8 +156,10 @@ func main() {
 	rl.InitWindow(window.w, window.h, "Game Boy Emulator made in Go")
 	defer rl.CloseWindow()
 
-	debugFont = rl.LoadFont(debugFontPath)
-	defer rl.UnloadFont(debugFont)
+	if DEV {
+		debugFont = rl.LoadFont(debugFontPath)
+		defer rl.UnloadFont(debugFont)
+	}
 
 	gameScreen = rl.LoadRenderTexture(TRUEWIDTH, TRUEHEIGHT)
 	defer rl.UnloadRenderTexture(gameScreen)

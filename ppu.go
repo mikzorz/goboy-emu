@@ -1,8 +1,6 @@
 package main
 
 import (
-  // "fmt"
-	// "log"
 	utils "github.com/mikzorz/gameboy-emulator/helpers"
 	"sort"
 )
@@ -18,18 +16,18 @@ type PPU struct {
 	dot                                                    int    // current dot of scanline
 	oamScanI                                               byte   // index of OAM to scan
 	savedObjects                                           []byte // object' oam indices, for objects on current scanline
-  objFetcher ObjFetcher
-  bgFetcher BGFetcher
-	fetchingObject                                         bool   // currently fetching object pixel data
-	objectToFetch                                          byte   // oam index of object to be fetched
+	objFetcher                                             ObjFetcher
+	bgFetcher                                              BGFetcher
+	fetchingObject                                         bool // currently fetching object pixel data
+	objectToFetch                                          byte // oam index of object to be fetched
 	fetchStep                                              int
 	fetcherReset                                           bool // for reseting background fetcher at beginning of each scanline
 	tileID, tileLow, tileHigh                              byte
 	oldConditionState                                      byte
-  windowLineCounter byte
-  windowReached bool
-  belowWindowTop bool
-  fetchingWindow bool
+	windowLineCounter                                      byte
+	windowReached                                          bool
+	belowWindowTop                                         bool
+	fetchingWindow                                         bool
 }
 
 type ppuMode string
@@ -42,17 +40,17 @@ const (
 )
 
 func NewPPU() *PPU {
-  ppu :=  &PPU{
-		vram: [0x2000]byte{},
-    objFetcher: ObjFetcher{},
-    bgFetcher: BGFetcher{},
-		LCDC: 0x91,
-		BGP:  0xFC,
-		OBP0: 0xFF,
-		OBP1: 0xFF,
+	ppu := &PPU{
+		vram:       [0x2000]byte{},
+		objFetcher: ObjFetcher{},
+		bgFetcher:  BGFetcher{},
+		LCDC:       0x91,
+		BGP:        0xFC,
+		OBP0:       0xFF,
+		OBP1:       0xFF,
 	}
 
-  return ppu
+	return ppu
 }
 
 func (p *PPU) Cycle() {
@@ -75,21 +73,21 @@ func (p *PPU) Cycle() {
 		switch p.mode {
 		case MODE_OAMSCAN:
 			// OAM Scan
-      if p.bus.clock.sysClock % 2 == 0 {
-        if len(p.savedObjects) < 10 && p.objectOnScanline(p.oamScanI, p.LY) {
-          p.saveObjectIndex(p.oamScanI)
-        }
-        p.oamScanI += 4
-      }
+			if p.bus.clock.sysClock%2 == 0 {
+				if len(p.savedObjects) < 10 && p.objectOnScanline(p.oamScanI, p.LY) {
+					p.saveObjectIndex(p.oamScanI)
+				}
+				p.oamScanI += 4
+			}
 		case MODE_DRAWING:
 			// Drawing to LCD
 			// TODO
 			// Window
 
-      p.objFetcher.Cycle(p)
-      p.bgFetcher.Cycle(p)
+			p.objFetcher.Cycle(p)
+			p.bgFetcher.Cycle(p)
 
-      p.checkIfWindowReached()
+			p.checkIfWindowReached()
 
 		case MODE_HBLANK:
 			// H-Blank
@@ -97,7 +95,7 @@ func (p *PPU) Cycle() {
 			// V-Blank
 		}
 
-    // TODO: for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
+		// TODO: for monochrome gb, LCD interrupt sometimes triggers during modes 0,1,2 or LY==LYC when writing to STAT (even $00). It behaves as if $FF is written for 1 M-cycle, then the actual written data the next M-cycle.
 
 		p.dot++
 
@@ -153,10 +151,10 @@ func (p *PPU) setMode() {
 			p.mode = MODE_OAMSCAN
 			p.STAT = (p.STAT & 0xFC) | 0x02
 
-      p.windowReached = false
-      if p.WY == p.LY {
-        p.belowWindowTop = true
-      }
+			p.windowReached = false
+			if p.WY == p.LY {
+				p.belowWindowTop = true
+			}
 
 			p.savedObjects = []byte{}
 			p.oamScanI = 0
@@ -175,17 +173,17 @@ func (p *PPU) setMode() {
 			p.fetcherReset = false
 			p.x = 0
 			p.bus.lcd.SetX(0)
-      if p.windowReached {
-        p.windowLineCounter++
-      }
+			if p.windowReached {
+				p.windowLineCounter++
+			}
 
 			p.STATInterrupt()
 		}
 	} else {
 		if p.mode != MODE_VBLANK {
 			p.mode = MODE_VBLANK
-      p.belowWindowTop = false
-      p.windowLineCounter = 0
+			p.belowWindowTop = false
+			p.windowLineCounter = 0
 			p.STAT = (p.STAT & 0xFC) | 0x01
 			p.STATInterrupt()
 			p.bus.InterruptRequest(VBLANK_INTR)
@@ -198,12 +196,12 @@ func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 	y := p.bus.dma.oam[oamIndex]
 	// x := p.bus.dma.oam[oamIndex+1]
 
-  // According to gbdev, an object with x = 0 still counts towards the 10 object limit.
-  // GBEDG says that x must be greater than 0.
-  // TODO: confirm
-  // if x == 0 {
-  //   return false
-  // }
+	// According to gbdev, an object with x = 0 still counts towards the 10 object limit.
+	// GBEDG says that x must be greater than 0.
+	// TODO: confirm
+	// if x == 0 {
+	//   return false
+	// }
 
 	spriteSize := byte(8)
 	if utils.GetBit(2, p.LCDC) == 1 {
@@ -220,12 +218,12 @@ func (p *PPU) objectOnScanline(oamIndex, scanline byte) bool {
 
 // Returns the row number of an object that is on the current scanline
 func (p *PPU) objectRowOnScanline(objY, scanline, scroll byte) byte {
-	return 16 + scanline  - objY
+	return 16 + scanline - objY
 }
 
 func (p *PPU) saveObjectIndex(idx byte) {
 	p.savedObjects = append(p.savedObjects, idx)
-  // Sort objects from lowest x to highest
+	// Sort objects from lowest x to highest
 	sort.Slice(p.savedObjects, func(i, j int) bool {
 		return p.bus.dma.oam[p.savedObjects[i]+1] < p.bus.dma.oam[p.savedObjects[j]+1]
 	})
@@ -236,7 +234,7 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 	if len(p.savedObjects) > 0 {
 		index := p.savedObjects[0]
 		objX := p.bus.dma.oam[index+1]
-    if objX <= p.bus.lcd.GetX() + 8 {
+		if objX <= p.bus.lcd.GetX()+8 {
 			p.savedObjects = p.savedObjects[1:]
 			return index, true
 		}
@@ -246,30 +244,29 @@ func (p *PPU) objectAtCurrentX() (index byte, objectFound bool) {
 
 }
 
-
 // Given x (0-31) and y (0-255) coordinates, find the corresponding map tile and return its value.
 func (p *PPU) getTileIDFromMap(x, y byte) byte {
 	mapAddr := uint16(0x1800)
-  var tilex, tiley byte
+	var tilex, tiley byte
 
-    // bg tile
-    if utils.GetBit(3, p.LCDC) == 1 {
-      mapAddr += 0x400
-    }
-  	tilex, tiley = p.getTileCoords(x, y, p.SCX, p.SCY)
+	// bg tile
+	if utils.GetBit(3, p.LCDC) == 1 {
+		mapAddr += 0x400
+	}
+	tilex, tiley = p.getTileCoords(x, y, p.SCX, p.SCY)
 	offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
 	return p.vram[mapAddr+offset]
 }
 
 func (p *PPU) getWindowIDFromMap(x, y byte) byte {
 	mapAddr := uint16(0x1800)
-  var tilex, tiley byte
+	var tilex, tiley byte
 
-	  // window tile
-	  if utils.GetBit(6, p.LCDC) == 1 {
-	    mapAddr += 0x400
-	  }
-    tilex, tiley = p.getTileCoords(x, y, 0, 0)
+	// window tile
+	if utils.GetBit(6, p.LCDC) == 1 {
+		mapAddr += 0x400
+	}
+	tilex, tiley = p.getTileCoords(x, y, 0, 0)
 	offset := (uint16(tiley)*32 + uint16(tilex)) & 0x3FF
 	return p.vram[mapAddr+offset]
 }
@@ -308,18 +305,18 @@ func (p *PPU) mergeTileBytes(hi, lo byte) []Pixel {
 
 func (p *PPU) checkIfWindowReached() {
 
-  if utils.IsBitSet(5, p.LCDC) && p.belowWindowTop && p.x+7 >= p.WX {
-    p.fetchingWindow = true
+	if utils.IsBitSet(5, p.LCDC) && p.belowWindowTop && p.x+7 >= p.WX {
+		p.fetchingWindow = true
 
-    if !p.windowReached {
-      p.windowReached = true
-      p.x = 0
-      p.bgFIFO.Clear()
-      p.fetchStep = 0
-    }
-  } else {
-    p.fetchingWindow = false
-  }
+		if !p.windowReached {
+			p.windowReached = true
+			p.x = 0
+			p.bgFIFO.Clear()
+			p.fetchStep = 0
+		}
+	} else {
+		p.fetchingWindow = false
+	}
 }
 
 // If condition is met when no conditions were met before, trigger STAT interrupt

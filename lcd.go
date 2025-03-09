@@ -51,19 +51,19 @@ func NewLCD() *LCD {
 func (l *LCD) Cycle() {
 	if utils.IsBitSet(7, l.bus.ppu.LCDC) {
 
-    // TODO: don't check if ppu mode == DRAWING, when final pixels are pushed to FIFO, ppu should be able to switch to HBLANK while the LCD keeps drawing
+		// TODO: don't check if ppu mode == DRAWING, when final pixels are pushed to FIFO, ppu should be able to switch to HBLANK while the LCD keeps drawing
 		if l.bus.ppu.mode == MODE_DRAWING && int32(l.x) < TRUEWIDTH && l.bgFIFO.CanPop() && !l.bus.ppu.fetchingObject {
-      // Always pop a bg pixel, only pop obj pixel if one exists
+			// Always pop a bg pixel, only pop obj pixel if one exists
 			bgPix := l.bgFIFO.Pop()
 			objPix := Pixel{}
-			if l.objFIFO.CanPop() { 
+			if l.objFIFO.CanPop() {
 				objPix = l.objFIFO.Pop()
 			}
 
 			if l.pixelsToDiscard > 0 {
 				l.pixelsToDiscard--
 			} else {
-        c := l.GetPixelColour(bgPix, objPix)
+				c := l.GetPixelColour(bgPix, objPix)
 
 				// Draw from top-left
 				if !l.bus.screenDisabled {
@@ -77,37 +77,36 @@ func (l *LCD) Cycle() {
 }
 
 func (l *LCD) GetPixelColour(bgPix, objPix Pixel) color.RGBA {
-  pix := Pixel{}
-  var palAddr uint16
+	pix := Pixel{}
+	var palAddr uint16
 
-  bgWinEnabled := utils.IsBitSet(0, l.bus.ppu.LCDC)
-  objEnabled := utils.IsBitSet(1, l.bus.ppu.LCDC)
+	bgWinEnabled := utils.IsBitSet(0, l.bus.ppu.LCDC)
+	objEnabled := utils.IsBitSet(1, l.bus.ppu.LCDC)
 
-  if !objEnabled {
-    objPix.c = 0
-  }
+	if !objEnabled {
+		objPix.c = 0
+	}
 
-  if !bgWinEnabled {
-    // if bg/window is disabled and object is either transparent or disabled, draw a white pixel
-    if objPix.c == 0 {
-      return colours[0]
-    }
-    bgPix.c = 0
-  }
+	if !bgWinEnabled {
+		// if bg/window is disabled and object is either transparent or disabled, draw a white pixel
+		if objPix.c == 0 {
+			return colours[0]
+		}
+		bgPix.c = 0
+	}
 
-  if (objPix.bgPriority == 1 && bgPix.c != 0) || objPix.c == 0 {
-    pix.c = bgPix.c
-    palAddr = 0xFF47
-  } else {
-    pix.c = objPix.c
-    palAddr = 0xFF48 + uint16(objPix.pal)
-  }
+	if (objPix.bgPriority == 1 && bgPix.c != 0) || objPix.c == 0 {
+		pix.c = bgPix.c
+		palAddr = 0xFF47
+	} else {
+		pix.c = objPix.c
+		palAddr = 0xFF48 + uint16(objPix.pal)
+	}
 
-  paletteIdx := (pix.c * 2)
-  pal := bus.Read(palAddr)
-  return colours[(pal>>paletteIdx)&0x3]
+	paletteIdx := (pix.c * 2)
+	pal := bus.Read(palAddr)
+	return colours[(pal>>paletteIdx)&0x3]
 }
-
 
 func (l *LCD) SetBus(b *Bus) {
 	l.bus = b
