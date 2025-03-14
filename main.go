@@ -20,29 +20,6 @@ var logfile *os.File
 
 var enableDebugInfo bool
 
-// Big TODO List
-
-// - Y-flip objects
-// - Windows might need shifting by a pixel
-// - Fix screen tearing (very noticable in Zelda when camera moves to left and right)
-// - Fix top row(s)
-// - Audio
-// - Save data
-// - Change default controls
-// - Dr Mario freezes after the menus
-
-// - Pass more tests (need to fix timing differences)
-
-// - When test reaches loop at end, pressing [s] freezes emu, requiring forced quit
-//    End of test is JR to itself, causing infinite loop
-
-// - My implementation of a bus is completely wrong for a gameboy. The gameboy has 2(?) main buses, 1 goes to vram via ppu? Buses do not have clocks.
-
-// - Finish setting default values
-// - Rearrange components to match hardware more closely
-
-// - Check all of the other TODOs
-
 var joypadMap = map[int32]Button{
 	rl.KeyZ:         JoyA,
 	rl.KeyX:         JoyB,
