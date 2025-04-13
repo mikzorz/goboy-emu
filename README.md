@@ -1,11 +1,48 @@
-Game Boy emulator written in Go
+# Game Boy emulator written in Go
 
+> [!WARNING]
+> This emulator is a work-in-progress-on-hiatus.
 
-The debug info is drawn using a hardcoded Noto font. If you don't have it, replace `debugFontPath` in debug.go with a font that you like. At some point, a font may be provided with the emulator.
+## About
 
-The automated tests expect the test roms to be in a certain location.
+ Goboy is a Game Boy (DMG) emulator written in Go. The purpose of this project was to demystify how emulators work and to see what I could put together just by reading the docs. This emulator is currently not worth using to play games, it is missing features like audio and saving. The features that have been implemented kind of work.  
 
-Big TODO List
+ At first, I avoided looking at other GB emulators. I wanted to figure out how to code the functionality by myself based on what the pandocs explained about the hardware. By the end, I was reading everyone else's code.
+
+ There was a lot of information to take in all at once and I didn't know how to begin, so I checked out some NES emulator tutorials for some hints. This led to me making wrongful assumptions about the hardware of the GB, which is a bit different to the NES. Not only that, different resources claim different things. I had to start referencing various other docs and forum posts during the development process.
+
+ If I started from scratch, knowing what I do now about the hardware, I would use TDD from the very beginning, for two main reasons:
+
+1) I had a bug with one particular opcode that was used by Blargg's test roms to setup tests. The buggy opcode was causing multiple tests to fail and the test roms weren't able to tell me what the problem was. I scoured through my code looking for a needle in a haystack. Unit tests could have prevented this.
+
+2) TDD would have encouraged me to decouple the hardware components from each other and to use dependency injection.
+
+This is all in hindsight, of course. When I started, I was worried about writing tests based on wrongful assumptions. I just wanted to see *something* working.
+
+## Usage
+
+Build
+```
+git clone https://github.com/mikzorz/goboy-emu.git
+cd goboy-emu
+go build .
+```
+
+Run  
+`./goboy-emu -rom ROM_PATH`
+
+> [!NOTE]
+> Hardcoded values
+
+ The debug info is drawn using a hardcoded Noto font. If you don't have it, replace `debugFontPath` in debug.go with a font that you like. At some point, a font may be provided with the emulator.
+
+`testrom_suite_test.go` automatically runs a whole bunch of mooneye acceptance tests.
+Mooneye test suite needs to be downloaded separately (should probably include as a git submodule or something).
+Set the `path` variable in `testrom_suite_test.go` to the path of the directory containing the acceptance tests.
+
+DEV mode can be toggled in main.go
+
+## TODO
 
 - Y-flip objects (Zelda map has an object that needs flipping)
 - Change default controls
@@ -27,4 +64,4 @@ Big TODO List
 - Finish setting default values
 - Rearrange components to match hardware more closely
 
-- Check all of the other TODOs
+- Check all of the other TODOs scattered throughout the code
