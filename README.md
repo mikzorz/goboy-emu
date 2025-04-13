@@ -1,11 +1,11 @@
-# Game Boy emulator written in Go
+# GoBoy - Game Boy emulator written in Go
 
 > [!WARNING]
 > This emulator is a work-in-progress-on-hiatus.
 
-## About
+## Why
 
- Goboy is a Game Boy (DMG) emulator written in Go. The purpose of this project was to demystify how emulators work and to see what I could put together just by reading the docs. This emulator is currently not worth using to play games, it is missing features like audio and saving. The features that have been implemented kind of work.  
+ The purpose of this project was to understand how emulators work and to see what I could put together just by reading the docs. This emulator is **currently not worth using** to play games, it is missing features like audio and saving. The features that have been implemented kind of work.  
 
  At first, I avoided looking at other GB emulators. I wanted to figure out how to code the functionality by myself based on what the pandocs explained about the hardware. By the end, I was reading everyone else's code.
 
@@ -19,7 +19,8 @@
 
 This is all in hindsight, of course. When I started, I was worried about writing tests based on wrongful assumptions. I just wanted to see *something* working.
 
-## Usage
+## Usage (if you insist)
+There is a pre-built binary in the repo. May only work on my system. Not sure.
 
 ### Build
 Check https://github.com/gen2brain/raylib-go for dependencies
