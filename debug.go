@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	rl "github.com/gen2brain/raylib-go/raylib"
-	utils "github.com/mikzorz/gameboy-emulator/helpers"
+	utils "github.com/mikzorz/goboy-emu/helpers"
 	"log"
 	"reflect"
 	"strings"

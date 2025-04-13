@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/mikzorz/gameboy-emulator/alu"
-	utils "github.com/mikzorz/gameboy-emulator/helpers"
+	"github.com/mikzorz/goboy-emu/alu"
+	utils "github.com/mikzorz/goboy-emu/helpers"
 	"log"
 )
 

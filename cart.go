@@ -1,7 +1,7 @@
 package main
 
 import (
-	utils "github.com/mikzorz/gameboy-emulator/helpers"
+	utils "github.com/mikzorz/goboy-emu/helpers"
 )
 
 type Cart struct {

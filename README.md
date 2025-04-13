@@ -21,15 +21,18 @@ This is all in hindsight, of course. When I started, I was worried about writing
 
 ## Usage
 
-Build
+### Build
+Check https://github.com/gen2brain/raylib-go for dependencies
 ```
 git clone https://github.com/mikzorz/goboy-emu.git
 cd goboy-emu
 go build .
 ```
 
-Run  
-`./goboy-emu -rom ROM_PATH`
+### Run  
+```
+./goboy-emu -rom ROM_PATH
+```
 
 > [!NOTE]
 > Hardcoded values
@@ -53,6 +56,7 @@ DEV mode can be toggled in main.go
 - Fix top row(s)
 - Dr Mario & Mario Picross both freeze after the initial menus.
 - In Yugioh, when selecting a monster to attack with, a small menu in bottom right is not rendered correctly.
+- Castlevania, window doesn't stay put.
 
 - Pass more tests (need to fix timing differences)
 
